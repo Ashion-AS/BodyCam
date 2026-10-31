@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">执法记录仪</string>
+
+    <string name="btn_capture">拍照</string>
+    <string name="btn_record">录像</string>
+    <string name="btn_stop">停止</string>
+    <string name="hint_keys">音量+ 拍照 · 音量- 开始/停止录像</string>
+    <string name="status_booting">相机准备中…</string>
+
+    <string name="need_permission">需要相机与录音权限才能工作</string>
+    <string name="no_camera">没有找到可用的摄像头</string>
+    <string name="gl_failed">OpenGL 初始化失败</string>
+    <string name="camera_not_ready">相机尚未就绪</string>
+
+    <string name="photo_saved">照片已保存：%1$s</string>
+    <string name="photo_failed">照片保存失败</string>
+    <string name="video_saved">已保存 %1$d 个片段，最后一个：%2$s</string>
+    <string name="video_failed">视频保存失败（可能没有录到帧）</string>
+    <string name="record_init_failed">录像初始化失败</string>
+    <string name="record_saving">正在保存上一段，请稍候</string>
+    <string name="audio_silent">注意：本次录像几乎没有声音（麦克风峰值 %1$d）</string>
+    <string name="rotation_offset">校准 +%1$d° → R=%2$d，输出 %3$d×%4$d</string>
+
+    <string name="channel_name">录像状态</string>
+    <string name="channel_desc">录像时保持相机与麦克风在后台运行</string>
+    <string name="notification_title">正在录像</string>
+    <string name="notification_text">点击返回应用，或使用下方按钮停止</string>
+    <string name="action_stop">停止录像</string>
+
+    <string name="accessibility_label">音量键助手（息屏可用）</string>
+    <string name="accessibility_desc">开启后，即使屏幕关闭，也能用音量键拍照和开始/停止录像。</string>
+</resources>

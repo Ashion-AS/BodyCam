@@ -1,0 +1,44 @@
+# ---- Gradle / 构建产物 ----
+.gradle/
+build/
+app/build/
+!gradle/wrapper/gradle-wrapper.jar
+local.properties
+
+# ---- Android Studio / IntelliJ ----
+.idea/
+*.iml
+*.iws
+*.ipr
+captures/
+.navigation/
+
+# ---- NDK / CMake ----
+.cxx/
+.externalNativeBuild/
+
+# ---- 编译输出与签名文件 ----
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+
+# ---- 日志与临时文件 ----
+*.log
+*.hprof
+*.tmp
+*.bak
+_test_*
+_*.png
+_*.jpg
+_*.mp4
+
+# ---- 系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
