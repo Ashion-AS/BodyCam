@@ -7,11 +7,13 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 录像按 30 分钟自动切片，切片过程编码器不重启，因此不丢画面。
 照片同样会烧上水印，并且会按 EXIF 方向把像素真正转正。
 
-![预览界面](docs/preview.png)
+<p align="center">
+  <img src="docs/preview.jpg" width="300" alt="预览界面">
+  <img src="docs/photo_watermark.jpg" width="300" alt="照片水印">
+</p>
 
-| 照片（烧水印） | 录制回放 |
-| --- | --- |
-| ![照片](docs/photo_watermark.jpg) | ![回放](docs/video_playback.png) |
+> 左：实时预览（水印左下角，音量键控制）；右：拍照输出，方向已转正、水印已烧进画面。
+> 录制样例：[docs/sample_video.mp4](docs/sample_video.mp4)（含音轨）
 
 ---
 
