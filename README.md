@@ -249,9 +249,13 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
    并且要在用户可见时启动。
 4. **音频**：单声道 48kHz / 128kbps；需要双声道改 `SegmentRecorder` 里的
    `CHANNELS` 与 `AudioFormat.CHANNEL_IN_MONO`。
-5. **MP4 尾部索引**：`moov` 是在停止录制时才写入的（MediaMuxer 的行为，MediaRecorder
-   也一样）。如果进程被强杀，当前这一段会不可播放。要彻底解决需要改成 fMP4 分片或
-   定期 finalize，这里没做。
+5. **MP4 尾部索引**（已修复）：早先用传统 MP4，`moov` 要等 `stop()` 才写，
+   进程被强杀当前这段会整体报废。现已改用 **fMP4（分片 MP4）**，moov/mvex
+   前置、数据按 `moof+mdat` 分片自包含——强杀后已写入的部分仍可直接播放，
+   只有最后不到 1 秒可能丢。副作用：输出文件总时长/时长从不更新，极个别
+   播放器会显示 `--:--`（进度条仍在走），拖拽到末尾也不额外补帧。若需
+   精确时长，可在文件关闭后用 `MediaMetadataRetriever` 重新写入或设
+   `KEY_MEDIA_INFINITE`。
 6. **方向上报不规范的机型**：极少数设备的 `SENSOR_ORIENTATION` 与实际成像不符，
    表现为画面整体差 90°。开 `DEBUG_OVERLAY` 看 `R`，用 `ROTATION_OVERRIDE`
    填相反角度即可（画幅仍然是竖屏），不需要改算法。

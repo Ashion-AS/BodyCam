@@ -519,12 +519,32 @@ class SegmentRecorder(private val context: Context) {
 
     // ---------------------------------------------------------------- 分段 / 封装
 
+    /**
+     * fMP4 的 `MUXER_OUTPUT_FRAGMENTED_MPEG_4` 是 @hide 常量（SDK 桩里没有），
+     * 只能反射拿。它从 API 26 起在运行时必然存在（本工程 minSdk 就是 26），
+     * 拿不到就退回传统 MP4。
+     * 返回的 MediaMuxer.OutputFormat 常量可安全传给 MediaMuxer 构造。
+     */
+    private fun fragmentedFormat(): Int {
+        return try {
+            MediaMuxer.OutputFormat::class.java
+                .getDeclaredField("MUXER_OUTPUT_FRAGMENTED_MPEG_4")
+                .getInt(null)
+        } catch (e: Exception) {
+            Log.w(TAG, "FMP4 unavailable, fallback to MP4", e)
+            MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+        }
+    }
+
     private fun createMuxerLocked() {
         val dir = Storage.videoDir(context)
         val name = "VID_${nameBase}_part${String.format(Locale.US, "%02d", segmentIndex)}.mp4"
         val file = File(dir, name)
         val muxer = try {
-            MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).apply {
+            // 用 fMP4 而非传统 MP4：moov/mvex 前置、数据按 moof+mdat 分片自包含，
+            // 进程被强杀时已写入的 fragment 仍可直接播放（只有最后不到 1 秒可能丢）。
+            // 传统 MP4 的 moov 要等 stop() 才落盘，强杀就整段报废。
+            MediaMuxer(file.absolutePath, fragmentedFormat()).apply {
                 setOrientationHint(orientationHint)
             }
         } catch (e: Exception) {
