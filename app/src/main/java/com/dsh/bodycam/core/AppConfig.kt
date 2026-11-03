@@ -11,7 +11,7 @@ object AppConfig {
     const val WATERMARK_WIDTH = 0.60f
 
     /** 水印左下角距离画面左边 / 下边的比例 */
-    const val WATERMARK_LEFT = 0.045f
+    const val WATERMARK_LEFT = 0.070f
     const val WATERMARK_BOTTOM = 0.045f
 
     /** 水印上的设备编号，可按需改成警号 */

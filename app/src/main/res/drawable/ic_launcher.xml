@@ -4,10 +4,6 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 深色底 -->
-    <path
-        android:fillColor="#0E141B"
-        android:pathData="M0,0h108v108H0z" />
     <!-- 机身 -->
     <path
         android:fillColor="#1E2A38"
