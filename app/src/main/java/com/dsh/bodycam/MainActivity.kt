@@ -69,7 +69,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
     private lateinit var hintView: TextView
     private lateinit var debugView: TextView
     private lateinit var preRecordDot: View
-    private lateinit var btnSettings: TextView
+    private lateinit var btnSettings: View
 
     private var pipeline: GlPipeline? = null
     private var surfaceTexture: SurfaceTexture? = null
