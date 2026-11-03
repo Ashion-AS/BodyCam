@@ -22,6 +22,7 @@ object WatermarkEngine {
     external fun nativeSetVideoSize(handle: Long, width: Int, height: Int)
     external fun nativeSetEncoderWindow(handle: Long, surface: Surface): Boolean
     external fun nativeClearEncoderWindow(handle: Long)
+    external fun nativeSetPreRecordSurface(handle: Long, surface: Surface?)
     external fun nativeSetRecording(handle: Long, recording: Boolean)
     external fun nativeSetWatermark(
         handle: Long,

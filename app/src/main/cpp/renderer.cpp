@@ -25,6 +25,8 @@ const GLfloat kTexCoord[] = {0.f, 0.f, 1.f, 0.f, 0.f, 1.f, 1.f, 1.f};
 // 位图第 0 行是图像顶部，而 GL 的 v=0 在底部，所以水印贴图要翻转 v
 const GLfloat kTexCoordFlipY[] = {0.f, 1.f, 1.f, 1.f, 0.f, 0.f, 1.f, 0.f};
 
+// 绝不能用于编码器时间戳：那是 steady_clock（CLOCK_MONOTONIC），
+// 与相机帧的 CLOCK_BOOTTIME 不同源，混用会写出时间轴错乱的 PTS。
 int64_t nowNanos() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                    std::chrono::steady_clock::now().time_since_epoch())
@@ -265,6 +267,7 @@ void GlRenderer::destroyEgl() {
         eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
         if (previewSurface_ != EGL_NO_SURFACE) eglDestroySurface(display_, previewSurface_);
         if (encoderSurface_ != EGL_NO_SURFACE) eglDestroySurface(display_, encoderSurface_);
+        if (preRecordSurface_ != EGL_NO_SURFACE) eglDestroySurface(display_, preRecordSurface_);
         if (pbuffer_ != EGL_NO_SURFACE) eglDestroySurface(display_, pbuffer_);
         if (context_ != EGL_NO_CONTEXT) eglDestroyContext(display_, context_);
         eglTerminate(display_);
@@ -277,8 +280,13 @@ void GlRenderer::destroyEgl() {
         ANativeWindow_release(encoderWindow_);
         encoderWindow_ = nullptr;
     }
+    if (preRecordWindow_) {
+        ANativeWindow_release(preRecordWindow_);
+        preRecordWindow_ = nullptr;
+    }
     previewSurface_ = EGL_NO_SURFACE;
     encoderSurface_ = EGL_NO_SURFACE;
+    preRecordSurface_ = EGL_NO_SURFACE;
     pbuffer_ = EGL_NO_SURFACE;
     context_ = EGL_NO_CONTEXT;
     display_ = EGL_NO_DISPLAY;
@@ -452,8 +460,10 @@ void GlRenderer::uploadWatermarkIfNeeded() {
 void GlRenderer::renderFrame() {
     const bool hasPreview = previewVisible_ && previewSurface_ != EGL_NO_SURFACE;
     const bool hasEncoder = recording_ && encoderSurface_ != EGL_NO_SURFACE;
+    // 预录缓存：只要有窗口就一直画（预录开启期间 recording_ 为 false）
+    const bool hasPreRecord = !recording_ && preRecordSurface_ != EGL_NO_SURFACE;
 
-    if (!hasPreview && !hasEncoder) {
+    if (!hasPreview && !hasEncoder && !hasPreRecord) {
         // 关键：即使这一刻不画，也必须把相机帧消费掉（updateTexImage）。
         // 否则 SurfaceTexture 的缓冲队列会被几帧填满，相机拿不到空闲 buffer，
         // 之后就不再出帧了 —— 表现就是「切后台再回前台，预览黑屏」。
@@ -463,7 +473,8 @@ void GlRenderer::renderFrame() {
         return;
     }
 
-    EGLSurface first = hasEncoder ? encoderSurface_ : previewSurface_;
+    EGLSurface first = hasEncoder ? encoderSurface_
+                                  : (hasPreRecord ? preRecordSurface_ : previewSurface_);
     if (!makeCurrent(first)) {
         LOGW("makeCurrent failed, drop frame");
         return;
@@ -472,19 +483,34 @@ void GlRenderer::renderFrame() {
     updateCameraTexture();
     uploadWatermarkIfNeeded();
 
+    // 编码器/预录的呈现时间戳必须和相机帧同源（CLOCK_BOOTTIME）。
+    // 相机还没出帧时 lastTimestamp_ 为 0，绝不能回退到 nowNanos()（steady_clock），
+    // 否则混进一个不同时基的 PTS，环形队列按它算窗口时会把正常帧全裁掉。
+    const int64_t encTs = lastTimestamp_;
+
     // 先画编码器：它可能阻塞（等编码器消费），不能让它拖住预览
-    if (hasEncoder) {
+    if (hasEncoder && encTs > 0) {
         drawScene(videoW_, videoH_, false);
-        const int64_t ts = lastTimestamp_ > 0 ? lastTimestamp_ : nowNanos();
-        eglPresentationTimeANDROID(display_, encoderSurface_, ts);
+        eglPresentationTimeANDROID(display_, encoderSurface_, encTs);
         if (!eglSwapBuffers(display_, encoderSurface_)) {
             LOGW("encoder swap failed 0x%x", eglGetError());
         }
     }
 
-    // 预览最后画并最后 swap，保证屏幕上看到的是最新一帧
+    // 预录缓存编码器：同正式编码器一样画满整幅输出画幅
+    if (hasPreRecord && encTs > 0) {
+        drawScene(videoW_, videoH_, false);
+        eglPresentationTimeANDROID(display_, preRecordSurface_, encTs);
+        if (!eglSwapBuffers(display_, preRecordSurface_)) {
+            LOGW("pre-record swap failed 0x%x", eglGetError());
+        }
+    }
+
+    // 预览最后画并最后 swap，保证屏幕上看到的是最新一帧。
+    // 注意：只要前面画过编码器/预录 surface，当前 context 就不是预览 surface，
+    // 必须显式切回来，否则 eglSwapBuffers 会报 EGL_BAD_SURFACE(0x300d) 黑屏。
     if (hasPreview) {
-        if (hasEncoder && !makeCurrent(previewSurface_)) return;
+        if (first != previewSurface_ && !makeCurrent(previewSurface_)) return;
         drawScene(previewW_, previewH_, true);
         if (!eglSwapBuffers(display_, previewSurface_)) {
             LOGW("preview swap failed 0x%x", eglGetError());
@@ -492,10 +518,12 @@ void GlRenderer::renderFrame() {
     }
 
     if ((frameCounter_++ % 30) == 0) {
-        LOGI("frame preview=%d enc=%d visible=%d pSurf=%p eSurf=%p",
-             hasPreview ? 1 : 0, hasEncoder ? 1 : 0, previewVisible_ ? 1 : 0,
+        LOGI("frame preview=%d enc=%d pre=%d visible=%d pSurf=%p eSurf=%p preSurf=%p",
+             hasPreview ? 1 : 0, hasEncoder ? 1 : 0, hasPreRecord ? 1 : 0,
+             previewVisible_ ? 1 : 0,
              reinterpret_cast<void*>(previewSurface_),
-             reinterpret_cast<void*>(encoderSurface_));
+             reinterpret_cast<void*>(encoderSurface_),
+             reinterpret_cast<void*>(preRecordSurface_));
     }
 }
 
@@ -682,6 +710,30 @@ bool GlRenderer::setEncoderWindow(ANativeWindow* window) {
 
 void GlRenderer::clearEncoderWindow() {
     setEncoderWindow(nullptr);
+}
+
+void GlRenderer::setPreRecordWindow(ANativeWindow* window) {
+    // 同步：调用方交接/摘除后紧接着就要 join 编码器线程，
+    // 必须保证渲染线程已停止往这个 Surface 出帧，否则编码器缓冲满会卡死 GL。
+    postAndWait([this, window]() {
+        if (preRecordSurface_ != EGL_NO_SURFACE) {
+            eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            eglDestroySurface(display_, preRecordSurface_);
+            preRecordSurface_ = EGL_NO_SURFACE;
+        }
+        if (preRecordWindow_) {
+            ANativeWindow_release(preRecordWindow_);
+            preRecordWindow_ = nullptr;
+        }
+        if (!window) return;
+        preRecordWindow_ = window;
+        preRecordSurface_ = eglCreateWindowSurface(display_, config_, window, nullptr);
+        if (preRecordSurface_ == EGL_NO_SURFACE) {
+            LOGW("create pre-record EGL surface failed 0x%x", eglGetError());
+        } else {
+            LOGI("pre-record window attached");
+        }
+    });
 }
 
 void GlRenderer::setRecording(bool recording) {

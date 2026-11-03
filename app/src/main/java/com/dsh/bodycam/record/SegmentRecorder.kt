@@ -1,16 +1,11 @@
 package com.dsh.bodycam.record
 
-import android.Manifest
-import android.annotation.SuppressLint
 import android.content.Context
-import android.content.pm.PackageManager
-import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
-import android.media.MediaRecorder
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
@@ -21,7 +16,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.concurrent.thread
-import kotlin.math.max
 
 /**
  * 录像器：MediaCodec 编码 + MediaMuxer 封装，支持**无缝分段**。
@@ -42,19 +36,20 @@ import kotlin.math.max
  *   视频：SurfaceTexture 时间戳(ns) / 1000 - sessionStartUs
  *   音频：首个采样时刻 + 累计帧数换算
  * 两条轨同源，A/V 不会漂。
+ *
+ * 预录交接：`start(preHandover = ...)` 时接管预录的视频编码器，并把预录阶段
+ * 已编码的音视频帧在 muxer 启动瞬间（[flushHandoverLocked]）一次性写入，
+ * 时间零点取交接视频首帧。所以成片开头就是按下录像键之前的画面与声音，
+ * 并且仍是**一个文件**。
  */
 class SegmentRecorder(private val context: Context) {
 
     companion object {
         private const val TAG = "SegmentRecorder"
-        private const val VIDEO_MIME = MediaFormat.MIMETYPE_VIDEO_AVC
-        private const val AUDIO_MIME = MediaFormat.MIMETYPE_AUDIO_AAC
-        private const val SAMPLE_RATE = 48_000
-        private const val CHANNELS = 1
-        private const val AUDIO_BITRATE = 128_000
-        private const val PCM_BYTES_PER_FRAME = 2 * CHANNELS
-        private const val DRAIN_TIMEOUT_US = 10_000L
         private const val STOP_TIMEOUT_MS = 4_000L
+
+        /** muxer 就绪前最多缓存多少实时视频帧（约 2 秒 @30fps） */
+        private const val MAX_PENDING_REALTIME_FRAMES = 60
     }
 
     private val lock = Object()
@@ -81,8 +76,20 @@ class SegmentRecorder(private val context: Context) {
     private var sessionStartUs = 0L
     private var basePtsUs = -1L
 
-    /** 音轨整体平移量；-1 表示还没确定 */
-    private var audioShiftUs = -1L
+    /** 预录交接的帧，muxer 启动时由 [flushHandoverLocked] 一次性写入 */
+    private var pendingVideoHandover: List<PreRecordBuffer.Frame>? = null
+    private var pendingAudioHandover: List<PreRecordBuffer.Frame>? = null
+
+    /**
+     * muxer 就绪前到达的实时视频帧。
+     *
+     * 交接后视频线程立刻开始出帧，但 muxer 要等新起的音频编码器吐出格式才
+     * 能 start()（150~250ms）。这段时间的帧若直接丢弃，成片里就会留下一个
+     * 几百毫秒的空洞（播放器在这一段只有花屏/冻结）。所以先缓存，等 muxer
+     * 起来后紧跟交接帧顺序写入。
+     */
+    private val pendingRealtimeVideo = ArrayList<PreRecordBuffer.Frame>()
+
     private var segmentStartPtsUs = 0L
     private var segmentDurationUs = 30 * 60 * 1_000_000L
     private var pendingSwitch = false
@@ -106,6 +113,10 @@ class SegmentRecorder(private val context: Context) {
 
     /**
      * 启动录制。
+     * @param preHandover 预录交接（视频编码器 + 已编码的最近 N 秒音视频帧），
+     *   null = 普通录像。传入时 [start] 接管预录的视频编码器与其输入 Surface
+     *   （GL 全程不换 Surface，交接不丢帧），音频用同样配置另起一套编码器，
+     *   并把交接的 AAC 帧先写进新音轨。
      * @return 编码器的输入 Surface（交给 OpenGL 渲染），失败返回 null
      */
     fun start(
@@ -114,34 +125,77 @@ class SegmentRecorder(private val context: Context) {
         fps: Int,
         bitrate: Int,
         orientation: Int,
-        segmentSeconds: Int
+        segmentSeconds: Int,
+        preHandover: PreRecordBuffer.Handover? = null
     ): Surface? {
         synchronized(lock) {
             if (started) return null
             files.clear()
             segmentIndex = 0
             basePtsUs = -1L
-            audioShiftUs = -1L
             segmentStartPtsUs = 0L
             pendingSwitch = false
             muxerStarted = false
+            pendingRealtimeVideo.clear()
             videoFormat = null
             audioFormat = null
             videoTrack = -1
             audioTrack = -1
-            segmentDurationUs = segmentSeconds.coerceAtLeast(1) * 1_000_000L
+            segmentDurationUs = segmentSeconds.coerceAtLeast(1) * US_PER_SECOND
             orientationHint = orientation
             // 必须用 CLOCK_BOOTTIME：相机帧时间戳（SENSOR_TIMESTAMP）就是这个时基。
             // 用 System.nanoTime()（CLOCK_MONOTONIC）的话，机器休眠过后两者会差出
             // 休眠总时长，音频 PTS 会全部小于视频基准，被当成「早于起点」全部丢弃。
             sessionStartUs = SystemClock.elapsedRealtimeNanos() / 1000
             nameBase = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            // 预录交接：时间零点取交接视频首帧，成片开头即预录画面。
+            // 交接块必须从关键帧起（GOP 对齐），否则解码器从缺参考帧的 P 帧
+            // 开始解码，开局必花屏并持续到下一个 IDR。这里再做一次兜底裁剪：
+            // 丢掉开头所有非关键帧。
+            val rawVideo = preHandover?.videoFrames ?: emptyList()
+            val alignedVideo = rawVideo.dropWhile {
+                it.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME == 0
+            }
+            if (preHandover != null) {
+                Log.i(
+                    TAG,
+                    "handover video ${rawVideo.size} -> ${alignedVideo.size} frames " +
+                            "(dropped ${rawVideo.size - alignedVideo.size} pre-GOP)"
+                )
+            }
+            // 交接块没有关键帧就没法干净解码，宁可整段丢掉走普通起点
+            pendingVideoHandover = alignedVideo.takeIf { it.isNotEmpty() }
+            if (alignedVideo.isNotEmpty()) {
+                sessionStartUs = alignedVideo.first().ptsUs
+                basePtsUs = 0L
+                segmentStartPtsUs = 0L
+                // 音频只能落在交接视频的时间范围内，否则音轨会伸进交接空档
+                val startPts = alignedVideo.first().ptsUs
+                val endPts = alignedVideo.last().ptsUs
+                pendingAudioHandover = preHandover?.audioFrames
+                    ?.filter { it.ptsUs in startPts..endPts }
+                    ?.takeIf { it.isNotEmpty() }
+            } else {
+                pendingAudioHandover = null
+            }
+            // 交接块之后的实时帧来自同一编码器，与交接块尾部在编码流上连续，
+            // 不需要等 IDR，也不需要丢弃（丢弃会在成片里留下音画空洞）。
             createMuxerLocked()
         }
 
         return try {
-            val surface = startVideoCodec(width, height, fps, bitrate)
-            startAudioCodec()
+            val surface: Surface
+            if (preHandover != null) {
+                videoCodec = preHandover.videoCodec
+                videoFormat = preHandover.videoFormat
+                surface = preHandover.videoSurface
+                // 音频用同样配置另起一套；交接的 AAC 帧由音频线程先写进新音轨
+                startAudioCodec()
+                synchronized(lock) { startMuxerIfReadyLocked() }
+            } else {
+                surface = startVideoCodec(width, height, fps, bitrate)
+                startAudioCodec()
+            }
             stopping = false
             started = true
             videoThread = thread(name = "bodycam-video-enc") { videoLoop() }
@@ -190,9 +244,9 @@ class SegmentRecorder(private val context: Context) {
         releaseInternal()
 
         return synchronized(lock) {
-            val valid = files.filter { it.exists() && it.length() > 0 }
             // 清掉没写进任何帧的空文件（例如刚开始录就立刻停止）
-            files.filter { !it.exists() || it.length() == 0L }.forEach { it.delete() }
+            val (valid, empty) = files.partition { it.exists() && it.length() > 0 }
+            empty.forEach { it.delete() }
             valid
         }
     }
@@ -226,38 +280,9 @@ class SegmentRecorder(private val context: Context) {
         return surface
     }
 
-    @SuppressLint("MissingPermission")  // 权限在 MainActivity 启动录像前已校验，这里再兜一层
     private fun startAudioCodec() {
-        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            throw IllegalStateException("缺少录音权限")
-        }
-        val format = MediaFormat.createAudioFormat(AUDIO_MIME, SAMPLE_RATE, CHANNELS).apply {
-            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-            setInteger(MediaFormat.KEY_BIT_RATE, AUDIO_BITRATE)
-            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16 * 1024)
-        }
-        val codec = MediaCodec.createEncoderByType(AUDIO_MIME)
-        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        codec.start()
+        val (codec, record) = openAudioCapture(context)
         audioCodec = codec
-
-        val minBuffer = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
-        )
-        val record = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            max(minBuffer, 8192) * 2
-        )
-        if (record.state != AudioRecord.STATE_INITIALIZED) {
-            record.release()
-            throw IllegalStateException("AudioRecord 初始化失败")
-        }
-        record.startRecording()
         audioRecord = record
     }
 
@@ -297,8 +322,8 @@ class SegmentRecorder(private val context: Context) {
 
             if (!isConfig && info.size > 0) {
                 val ptsUs = info.presentationTimeUs - sessionStartUs
-                // 编码器启动前相机可能已经在缓冲帧，这些帧的时间戳早于本次录制起点，
-                // 直接丢掉，否则会把 basePtsUs 拉成负数、让音轨整体后移（A/V 时长不一致）
+                // 预录交接场景：sessionStartUs 已回退到交接首帧，实时帧的
+                // ptsUs 必然 ≥ 0 且衔接在交接帧之后（同一编码器同一时基）
                 if (ptsUs >= 0) {
                     val buffer = codec.getOutputBuffer(index)
                     if (buffer != null) {
@@ -308,6 +333,68 @@ class SegmentRecorder(private val context: Context) {
             }
             codec.releaseOutputBuffer(index, false)
             if (eos) break
+        }
+    }
+
+    /**
+     * 把预录交接的视频帧写入当前 muxer（调用方需持有 lock 且 muxerStarted）。
+     * 时间零点 = 交接首帧（sessionStartUs），所以首帧 PTS 恰好为 0。
+     */
+    private fun writeHandoverFramesLocked(frames: List<PreRecordBuffer.Frame>) {
+        var n = 0
+        for (f in frames) {
+            val ptsUs = f.ptsUs - sessionStartUs
+            if (ptsUs < 0) continue
+            if (writeSampleLocked(videoTrack, f.data, ptsUs, f.flags)) {
+                segmentSamples++
+                n++
+            }
+        }
+        Log.i(TAG, "wrote $n handover video frames")
+        // 紧接着写入 muxer 就绪前缓存下来的实时帧，保证同一轨 PTS 连续
+        if (pendingRealtimeVideo.isNotEmpty()) {
+            var m = 0
+            for (f in pendingRealtimeVideo) {
+                val ptsUs = f.ptsUs - basePtsUs
+                if (ptsUs < 0) continue
+                if (writeSampleLocked(videoTrack, f.data, ptsUs, f.flags)) {
+                    segmentSamples++
+                    m++
+                }
+            }
+            Log.i(TAG, "wrote $m buffered realtime video frames")
+            pendingRealtimeVideo.clear()
+        }
+    }
+
+    /** 预录交接的音频帧（在音频线程里、muxer 起来后写入） */
+    private fun writeHandoverAudioLocked(frames: List<PreRecordBuffer.Frame>) {
+        if (!muxerStarted) return
+        for (f in frames) {
+            val ptsUs = f.ptsUs - sessionStartUs
+            if (ptsUs < 0) continue
+            if (writeSampleLocked(audioTrack, f.data, ptsUs, f.flags)) {
+                segmentSamples++
+                audioSamples++
+                audioBytes += f.data.size
+            }
+        }
+    }
+
+    /** 写一个已是连续字节的样本到指定轨 */
+    private fun writeSampleLocked(
+        track: Int,
+        data: ByteArray,
+        ptsUs: Long,
+        flags: Int
+    ): Boolean {
+        val outInfo = MediaCodec.BufferInfo().apply { set(0, data.size, ptsUs, flags) }
+        return try {
+            muxer?.writeSampleData(track, java.nio.ByteBuffer.wrap(data), outInfo)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "write sample", e)
+            false
         }
     }
 
@@ -331,7 +418,23 @@ class SegmentRecorder(private val context: Context) {
             basePtsUs = ptsUs
             segmentStartPtsUs = ptsUs
         }
-        if (!muxerStarted || ptsUs < basePtsUs) return
+        if (ptsUs < basePtsUs) return
+        if (!muxerStarted) {
+            // muxer 还没起来（等音频编码器吐格式）：先缓存，别丢帧。
+            // 丢了成片里就是一段空洞 → 播放到那里花屏/冻结。
+            pendingRealtimeVideo.add(
+                PreRecordBuffer.Frame(copyOut(buffer, info), ptsUs, info.flags)
+            )
+            // 上限兜底：正常情况下 muxer 一两百毫秒就起来了，缓存不会超过十几帧。
+            // 万一起不来，也不能无限增长（12Mbps 下每帧约 50KB）。
+            while (pendingRealtimeVideo.size > MAX_PENDING_REALTIME_FRAMES) {
+                pendingRealtimeVideo.removeAt(0)
+            }
+            if (pendingRealtimeVideo.size == 1) {
+                Log.i(TAG, "muxer not ready, buffering realtime video from ${ptsUs / 1000}ms")
+            }
+            return
+        }
 
         val outInfo = MediaCodec.BufferInfo().apply {
             set(info.offset, info.size, ptsUs - basePtsUs, info.flags)
@@ -361,9 +464,11 @@ class SegmentRecorder(private val context: Context) {
     private fun audioLoop() {
         val record = audioRecord ?: return
         val codec = audioCodec ?: return
-        val pcm = ByteArray(8192)
+        val pcm = ByteArray(PCM_BUFFER_SIZE)
         val info = MediaCodec.BufferInfo()
 
+        // 预录交接的音频帧由 muxer 启动时统一写入（flushHandoverLocked），
+        // 这里不需要额外处理。
         var frames = 0L
         var audioStartUs = -1L
         var lastPtsUs = 0L
@@ -372,7 +477,7 @@ class SegmentRecorder(private val context: Context) {
 
         while (true) {
             if (stopping) {
-                if (!eosQueued) eosQueued = queueAudioEos(codec, lastPtsUs)
+                if (!eosQueued) eosQueued = queueEos(codec, lastPtsUs)
             } else {
                 val read = try {
                     record.read(pcm, 0, pcm.size)
@@ -381,9 +486,13 @@ class SegmentRecorder(private val context: Context) {
                 }
                 if (read > 0) {
                     if (audioStartUs < 0) {
-                        audioStartUs = SystemClock.elapsedRealtimeNanos() / 1000 - sessionStartUs
+                        // 音轨起点（原始时基，微秒）。预录交接时由交接带来的
+                        // audioStartUs 接管，不会走到这里。
+                        audioStartUs = SystemClock.elapsedRealtimeNanos() / 1000
                     }
-                    val ptsUs = audioStartUs + frames * 1_000_000L / SAMPLE_RATE
+                    // 送进编码器的 PTS 始终用绝对时基，和视频（相机时间戳）
+                    // 同源；输出端再统一减 sessionStartUs 换成成片时间轴。
+                    val ptsUs = audioStartUs + frames * US_PER_SECOND / SAMPLE_RATE
                     frames += read.toLong() / PCM_BYTES_PER_FRAME
                     feedAudio(codec, pcm, read, ptsUs)
                     lastPtsUs = ptsUs
@@ -424,7 +533,7 @@ class SegmentRecorder(private val context: Context) {
                 }
                 if (SystemClock.elapsedRealtime() > stopDeadline) break
                 try {
-                    Thread.sleep(5)
+                    Thread.sleep(STOP_POLL_MS)
                 } catch (e: InterruptedException) {
                     break
                 }
@@ -433,22 +542,15 @@ class SegmentRecorder(private val context: Context) {
     }
 
     private fun onAudioFrameLocked(buffer: java.nio.ByteBuffer, info: MediaCodec.BufferInfo) {
+        // basePtsUs 是视频零点（普通录像时为第一条视频帧 PTS；预录交接时为 0）。
+        // 编码器输出的 PTS 是绝对时基（与视频同源），减 sessionStartUs 换成
+        // 成片相对时间轴，再减 basePtsUs 对齐视频起点。
         if (!muxerStarted || basePtsUs < 0) return
 
-        val rawPts = info.presentationTimeUs
-        if (audioShiftUs < 0L) {
-            // 兜底：万一音视频时基还是对不上（个别机型时钟源不同），
-            // 把整条音轨平移到视频起点，而不是把每一帧都当「早于起点」丢掉。
-            audioShiftUs = if (rawPts < basePtsUs) basePtsUs - rawPts else 0L
-            if (audioShiftUs > 0) {
-                Log.w(TAG, "audio shifted by ${audioShiftUs}us to align with video")
-            }
-        }
-
-        val ptsUs = rawPts + audioShiftUs
-        if (ptsUs < basePtsUs) return
+        val ptsUs = info.presentationTimeUs - sessionStartUs - basePtsUs
+        if (ptsUs < 0) return
         val outInfo = MediaCodec.BufferInfo().apply {
-            set(info.offset, info.size, ptsUs - basePtsUs, info.flags)
+            set(info.offset, info.size, ptsUs, info.flags)
         }
         buffer.position(info.offset)
         buffer.limit(info.offset + info.size)
@@ -462,28 +564,8 @@ class SegmentRecorder(private val context: Context) {
         }
     }
 
-    private fun feedAudio(codec: MediaCodec, data: ByteArray, size: Int, ptsUs: Long) {
-        var offset = 0
-        var pts = ptsUs
-        while (offset < size) {
-            val index = try {
-                codec.dequeueInputBuffer(DRAIN_TIMEOUT_US)
-            } catch (e: Exception) {
-                return
-            }
-            if (index < 0) return
-            val buffer = codec.getInputBuffer(index) ?: return
-            buffer.clear()
-            val count = minOf(buffer.remaining(), size - offset)
-            buffer.put(data, offset, count)
-            codec.queueInputBuffer(index, 0, count, pts, 0)
-            offset += count
-            pts += count.toLong() * 1_000_000L / (SAMPLE_RATE * PCM_BYTES_PER_FRAME)
-        }
-    }
-
     private var micPeakMax = 0
-    private var micLogCounter = 0
+    private var micSamplesSinceLog = 0
 
     /**
      * 每秒打印一次麦克风峰值（16bit PCM 的绝对最大值，满量程 32767）。
@@ -500,20 +582,10 @@ class SegmentRecorder(private val context: Context) {
         }
         if (peak > micPeakMax) micPeakMax = peak
         if (peak > sessionMicPeak) sessionMicPeak = peak
-        if (++micLogCounter >= 12) {
+        if (++micSamplesSinceLog >= 12) {
             Log.i(TAG, "mic peak(1s)=$micPeakMax")
             micPeakMax = 0
-            micLogCounter = 0
-        }
-    }
-
-    private fun queueAudioEos(codec: MediaCodec, ptsUs: Long): Boolean {        return try {
-            val index = codec.dequeueInputBuffer(DRAIN_TIMEOUT_US)
-            if (index < 0) return false
-            codec.queueInputBuffer(index, 0, 0, ptsUs, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-            true
-        } catch (e: Exception) {
-            false
+            micSamplesSinceLog = 0
         }
     }
 
@@ -572,6 +644,22 @@ class SegmentRecorder(private val context: Context) {
             muxerStarted = true
         } catch (e: Exception) {
             Log.e(TAG, "start muxer failed", e)
+            return
+        }
+        // muxer 刚起来：立刻写入预录交接帧，必须排在所有实时帧之前，
+        // 否则同一轨 PTS 会倒序（MediaMuxer 要求非递减）。
+        flushHandoverLocked()
+    }
+
+    /** 写入预录交接的音视频帧（调用方持锁且 muxerStarted） */
+    private fun flushHandoverLocked() {
+        pendingVideoHandover?.let { frames ->
+            writeHandoverFramesLocked(frames)
+            pendingVideoHandover = null
+        }
+        pendingAudioHandover?.let { frames ->
+            writeHandoverAudioLocked(frames)
+            pendingAudioHandover = null
         }
     }
 
@@ -616,32 +704,14 @@ class SegmentRecorder(private val context: Context) {
     // ---------------------------------------------------------------- 清理
 
     private fun releaseInternal() {
-        try {
-            videoCodec?.stop()
-        } catch (e: Exception) {
-        }
-        try {
-            videoCodec?.release()
-        } catch (e: Exception) {
-        }
+        runCatching { videoCodec?.stop() }
+        runCatching { videoCodec?.release() }
         videoCodec = null
-
-        try {
-            audioCodec?.stop()
-        } catch (e: Exception) {
-        }
-        try {
-            audioCodec?.release()
-        } catch (e: Exception) {
-        }
+        runCatching { audioCodec?.stop() }
+        runCatching { audioCodec?.release() }
         audioCodec = null
-
-        try {
-            audioRecord?.release()
-        } catch (e: Exception) {
-        }
+        runCatching { audioRecord?.release() }
         audioRecord = null
-
         synchronized(lock) { closeMuxerLocked() }
     }
 }
