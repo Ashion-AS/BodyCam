@@ -22,14 +22,18 @@ import android.widget.Toast
 import com.dsh.bodycam.camera.CameraController
 import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.core.KeyRouter
+import com.dsh.bodycam.core.SettingsStore
 import com.dsh.bodycam.gl.GlPipeline
+import com.dsh.bodycam.record.PreRecordBuffer
 import com.dsh.bodycam.record.SegmentRecorder
 import com.dsh.bodycam.service.KeepAliveService
 import com.dsh.bodycam.util.Storage
+import com.dsh.bodycam.util.rotationToDegrees
 import com.dsh.bodycam.watermark.PhotoWatermarker
 import com.dsh.bodycam.watermark.Telemetry
 import com.dsh.bodycam.watermark.WatermarkData
 import com.dsh.bodycam.watermark.WatermarkPainter
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -50,6 +54,9 @@ class MainActivity : Activity(), KeyRouter.Listener {
         private const val TICK_MS = 500L
         private const val PREFS = "bodycam"
         private const val KEY_ROTATION_OFFSET = "rotation_offset"
+
+        /** 未手动校准过的默认偏移：本机相机 SurfaceTexture 需要额外转 270° 才正向 */
+        private const val DEFAULT_ROTATION_OFFSET = 270
     }
 
     private lateinit var previewView: SurfaceView
@@ -61,12 +68,15 @@ class MainActivity : Activity(), KeyRouter.Listener {
     private lateinit var btnRecord: TextView
     private lateinit var hintView: TextView
     private lateinit var debugView: TextView
+    private lateinit var preRecordDot: View
+    private lateinit var btnSettings: TextView
 
     private var pipeline: GlPipeline? = null
     private var surfaceTexture: SurfaceTexture? = null
     private var cameraSurface: Surface? = null
     private var camera: CameraController? = null
     private var recorder: SegmentRecorder? = null
+    private var preRecordBuffer: PreRecordBuffer? = null
     private var painter: WatermarkPainter? = null
     private var telemetry: Telemetry? = null
 
@@ -87,12 +97,16 @@ class MainActivity : Activity(), KeyRouter.Listener {
      * 方向校准偏移：在自动算出的角度上再加这个值。
      * 不同机型相机 SurfaceTexture 的变换矩阵不一样（有的还带镜像），
      * 自动值可能差 90°，点一下调试行就能循环调整并持久化。
+     * 默认取 [DEFAULT_ROTATION_OFFSET]，本机开箱即正向，无需手动点。
      */
-    private var rotationOffset = 0
+    private var rotationOffset = DEFAULT_ROTATION_OFFSET
 
     private var recording = false
     private var recordStartElapsed = 0L
     private var resumed = false
+
+    /** 监听设置变化，销毁时解除，避免旧 Activity 被持有 */
+    private var settingsListener: SettingsStore.Listener? = null
 
     /** 停止录像要等编码器把尾帧写完，放到后台线程做，避免卡 UI */
     @Volatile
@@ -144,14 +158,24 @@ class MainActivity : Activity(), KeyRouter.Listener {
         previewView.holder.addCallback(surfaceCallback)
         btnShutter.setOnClickListener { capturePhoto() }
         btnRecord.setOnClickListener { toggleRecording() }
+        btnSettings.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        // 设置变化（预录开关/时长）→ 刷新预录缓存与黄点
+        settingsListener = object : SettingsStore.Listener {
+            override fun onSettingsChanged() {
+                runOnUiThread { applyPreRecordSetting() }
+            }
+        }
+        SettingsStore.setListener(settingsListener)
 
         // 方向校准：点调试行每次 +90°，可选 0/90/180/270，写入 SharedPreferences
-        rotationOffset = getSharedPreferences(PREFS, MODE_PRIVATE)
-            .getInt(KEY_ROTATION_OFFSET, 0)
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        rotationOffset = prefs.getInt(KEY_ROTATION_OFFSET, DEFAULT_ROTATION_OFFSET)
         debugView.setOnClickListener {
             rotationOffset = (rotationOffset + 90) % 360
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putInt(KEY_ROTATION_OFFSET, rotationOffset).apply()
+            prefs.edit().putInt(KEY_ROTATION_OFFSET, rotationOffset).apply()
             applyOrientation()
             updateWatermark()
             toast(getString(R.string.rotation_offset, rotationOffset, rotationDeg, videoW, videoH))
@@ -204,6 +228,8 @@ class MainActivity : Activity(), KeyRouter.Listener {
         // 后台期间相机可能被系统断开，回前台时重新打开
         camera?.ensureOpen()
         if (pipeline == null && hasCorePermission()) setup()
+        // 从设置页回来：按最新设置拉起/停止预录缓存并刷新黄点
+        if (!recording) applyPreRecordSetting()
         updateUi()
     }
 
@@ -218,6 +244,8 @@ class MainActivity : Activity(), KeyRouter.Listener {
 
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
+        settingsListener?.let { SettingsStore.clearListener(it) }
+        settingsListener = null
         if (recording) stopRecording(wait = true)
         KeyRouter.listener = null
         KeyRouter.armed = false
@@ -228,6 +256,8 @@ class MainActivity : Activity(), KeyRouter.Listener {
         stopExecutor.shutdown()
         if (!savingSegment) recorder?.release()
         recorder = null
+        preRecordBuffer?.release()
+        preRecordBuffer = null
         pipeline?.release()
         pipeline = null
         surfaceTexture?.release()
@@ -250,6 +280,8 @@ class MainActivity : Activity(), KeyRouter.Listener {
         btnRecord = findViewById(R.id.btnRecord)
         hintView = findViewById(R.id.hintView)
         debugView = findViewById(R.id.debugView)
+        preRecordDot = findViewById(R.id.preRecordDot)
+        btnSettings = findViewById(R.id.btnSettings)
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -334,6 +366,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
 
         painter = WatermarkPainter()
         recorder = SegmentRecorder(this)
+        preRecordBuffer = PreRecordBuffer(this)
 
         val controller = CameraController(
             context = this,
@@ -353,8 +386,48 @@ class MainActivity : Activity(), KeyRouter.Listener {
         statusView.text = "${videoW}×${videoH} · ${AppConfig.VIDEO_FPS}fps"
         updateDebugInfo()
         updateWatermark()
+        applyPreRecordSetting()
         // 水印时钟常驻：空闲时也要每秒刷新
         startTicker()
+    }
+
+    /**
+     * 根据设置启动/停止预录缓存，并更新黄点。
+     * - 开启：预录音视频编码器立即启动，GL 持续往它出帧；
+     * - 关闭/录像中：不启动（录像中 GL 的帧由正式录像编码器消费）。
+     * 画幅变化（转屏）时缓存尺寸会失配，这里重启一次以保持一致。
+     */
+    private fun applyPreRecordSetting() {
+        val p = pipeline
+        val buf = preRecordBuffer
+        if (p == null || buf == null) {
+            preRecordDot.visibility = View.GONE
+            return
+        }
+        val enabled = SettingsStore.isPreRecordEnabled(this)
+        val sizeMismatch = buf.isRunning &&
+                (buf.startedWidth != videoW || buf.startedHeight != videoH)
+        if (enabled && !recording && (!buf.isRunning || sizeMismatch)) {
+            if (buf.isRunning) {
+                buf.release()
+                p.setPreRecordSurface(null)
+            }
+            val surface = buf.start(
+                videoW, videoH, AppConfig.VIDEO_FPS, AppConfig.VIDEO_BITRATE,
+                SettingsStore.preRecordSeconds(this)
+            )
+            if (surface != null) p.setPreRecordSurface(surface)
+        } else if ((!enabled || recording) && buf.isRunning) {
+            buf.release()
+            p.setPreRecordSurface(null)
+        }
+        updatePreRecordDot()
+    }
+
+    /** 黄点：只反映「设置里预录是否开启」，与当前是否正在录像无关 */
+    private fun updatePreRecordDot() {
+        preRecordDot.visibility =
+            if (SettingsStore.isPreRecordEnabled(this)) View.VISIBLE else View.GONE
     }
 
     /**
@@ -396,12 +469,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
         return (sensorOrientation - displayDegrees() + 360) % 360
     }
 
-    private fun displayDegrees(): Int = when (currentRotation()) {
-        Surface.ROTATION_90 -> 90
-        Surface.ROTATION_180 -> 180
-        Surface.ROTATION_270 -> 270
-        else -> 0
-    }
+    private fun displayDegrees(): Int = rotationToDegrees(currentRotation())
 
     private fun updateDebugInfo() {
         if (!this::debugView.isInitialized) return
@@ -498,12 +566,32 @@ class MainActivity : Activity(), KeyRouter.Listener {
         // 先锁方向再启动编码器：让可能发生的界面重排走完，别和首帧抢渲染线程
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
 
+        // 预录交接：预录开着且缓存正在跑，就把「编码器 + 最近 N 秒帧」一并
+        // 交给录制器（成片 = 预录画面 + 实时画面，单个文件）；GL 不换 Surface。
+        // 顺序关键：先同步摘掉 GL 的预录 Surface，渲染线程不再出帧，编码器
+        // 才能安全排空并交接；否则编码器缓冲满会让 GL 渲染线程卡住。
+        val handover = preRecordBuffer?.takeIf { it.isRunning }?.let { buf ->
+            if (buf.startedWidth != videoW || buf.startedHeight != videoH) {
+                buf.release()
+                null
+            } else {
+                // 先同步摘掉 GL 的预录 Surface，渲染线程停手后编码器才能安全
+                // 排空并交接（否则编码器缓冲满会把 GL 渲染线程卡住）。
+                // 交接块本身已按 GOP 对齐（见 PreRecordBuffer.trimLocked），
+                // 可独立干净解码，不需要在这里额外逼 IDR。
+                p.setPreRecordSurface(null)
+                buf.beginHandover(SettingsStore.preRecordSeconds(this))
+            }
+        }
+
         val surface = rec.start(
             videoW, videoH, AppConfig.VIDEO_FPS, AppConfig.VIDEO_BITRATE,
             0,  // 画面已经烘成正向，不需要再写 rotation 元数据
-            AppConfig.SEGMENT_SECONDS
+            AppConfig.SEGMENT_SECONDS,
+            handover
         )
         if (surface == null) {
+            // 交接出去的编码器归录制器管，失败时得由录制器释放；这里只需提示
             toast(getString(R.string.record_init_failed))
             return
         }
@@ -547,8 +635,11 @@ class MainActivity : Activity(), KeyRouter.Listener {
         updateWatermark()
 
         val rec = recorder ?: return
+        val preEnabled = SettingsStore.isPreRecordEnabled(this)
         if (wait) {
             runCatching { rec.stop() }
+            if (!preEnabled) preRecordBuffer?.release()
+            runOnUiThread { applyPreRecordSetting() }
             return
         }
 
@@ -557,18 +648,22 @@ class MainActivity : Activity(), KeyRouter.Listener {
             val files = runCatching { rec.stop() }.getOrDefault(emptyList())
             val micPeak = rec.lastMicPeak
             savingSegment = false
-            uiHandler.post {
-                if (isDestroyed) return@post
-                toast(
-                    if (files.isEmpty()) getString(R.string.video_failed)
-                    else getString(R.string.video_saved, files.size, files.last().name)
-                )
-                // 麦克风峰值极低基本等于没录到声音（静音/被占用/权限问题），提示一下
-                if (files.isNotEmpty() && micPeak < 50) {
-                    toast(getString(R.string.audio_silent, micPeak))
-                }
-            }
+            uiHandler.post { onSegmentSaved(files, micPeak) }
         }
+    }
+
+    /** 录制文件已收尾：提示结果并重新拉起预录缓存（在 UI 线程） */
+    private fun onSegmentSaved(files: List<File>, micPeak: Int) {
+        if (isDestroyed) return
+        toast(
+            if (files.isEmpty()) getString(R.string.video_failed)
+            else getString(R.string.video_saved, files.size, files.last().name)
+        )
+        // 麦克风峰值极低基本等于没录到声音（静音/被占用/权限问题），提示一下
+        if (files.isNotEmpty() && micPeak < AppConfig.AUDIO_SILENT_THRESHOLD) {
+            toast(getString(R.string.audio_silent, micPeak))
+        }
+        applyPreRecordSetting()
     }
 
     private fun startTicker() {
@@ -624,6 +719,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
         recDot.visibility = if (recording) View.VISIBLE else View.INVISIBLE
         timerView.visibility = if (recording) View.VISIBLE else View.GONE
         hintView.visibility = if (recording) View.GONE else View.VISIBLE
+        updatePreRecordDot()
     }
 
     private fun toast(message: String) {

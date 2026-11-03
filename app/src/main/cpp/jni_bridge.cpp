@@ -112,6 +112,15 @@ Java_com_dsh_bodycam_gl_WatermarkEngine_nativeClearEncoderWindow(JNIEnv* /*env*/
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_dsh_bodycam_gl_WatermarkEngine_nativeSetPreRecordSurface(JNIEnv* env, jobject /*thiz*/,
+                                                                  jlong handle, jobject surface) {
+    GlRenderer* r = toRenderer(handle);
+    if (!r) return;
+    ANativeWindow* window = surface ? ANativeWindow_fromSurface(env, surface) : nullptr;
+    r->setPreRecordWindow(window);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_dsh_bodycam_gl_WatermarkEngine_nativeSetRecording(JNIEnv* /*env*/, jobject /*thiz*/,
                                                            jlong handle, jboolean recording) {
     if (GlRenderer* r = toRenderer(handle)) r->setRecording(recording == JNI_TRUE);

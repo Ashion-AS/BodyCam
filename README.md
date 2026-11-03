@@ -6,6 +6,8 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 直接送进 H.264 硬件编码器的输入 Surface，所以水印是「烧」在视频里的。
 录像按 30 分钟自动切片，切片过程编码器不重启，因此不丢画面。
 照片同样会烧上水印，并且会按 EXIF 方向把像素真正转正。
+可选开启**预录**：按下录像键之前的画面与声音也会被保存下来，与后面的录像合成**同一个文件**
+（缓存 5 / 10 / 20 / 30 秒可调）。
 
 <p align="center">
   <img src="docs/preview.jpg" width="300" alt="预览界面">
@@ -28,6 +30,8 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 时间水印（OpenGL + C++，低功耗） | `cpp/renderer.cpp` 合成 OES 纹理 + 水印纹理，EGL 直出到编码器 |
 | 30 分钟自动分段 | `SegmentRecorder`：编码器不停，只换 MediaMuxer |
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
+| 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
+| 预录开启提示 | 主界面右上角**黄点**（`preRecordDot`），设置页可开关 |
 
 ---
 
@@ -39,6 +43,7 @@ Camera2 ──SurfaceTexture──▶  OES 纹理 ──┐                     
                                          ├──▶ GL 合成 ──┬──▶ 预览 SurfaceView
 水印 Bitmap ──RGBA 纹理 ─────────────────┘              │
                                                         └──▶ MediaCodec 输入 Surface
+                                                              （预录/录像共用同一个编码器）
                                                               │
                                               ┌───────────────┴───────────────┐
                                         视频编码线程                     音频编码线程
@@ -53,6 +58,8 @@ Camera2 ──SurfaceTexture──▶  OES 纹理 ──┐                     
 - **一次采样、两处输出**：同一帧画到预览和编码器两个 EGL Surface，不做二次解码/编码。
 - **预览与成片一致**：预览用等比缩放 + 黑边，看到的就是录进去的构图（含水印）。
 - **分段不中断编码**：只在分段点换 muxer，编码器与相机全程不停。
+- **预录与录像共用编码器**：空闲时帧流向预录 Surface，按下录像键时把渲染目标切到
+  正式录像 Surface（就是该编码器自己的输入 Surface），编码器不重启、不丢帧（见「八点五」）。
 
 ---
 
@@ -63,12 +70,15 @@ app/src/main/
 ├── cpp/
 │   ├── CMakeLists.txt
 │   ├── shaders.h            # 顶点/相机/水印 三个 GLSL ES 2.0 着色器
-│   ├── renderer.h/.cpp      # EGL 上下文、双 Surface、GL 合成、方向补偿
+│   ├── renderer.h/.cpp      # EGL 上下文、三 Surface（预览/录像/预录）、GL 合成、方向补偿
 │   └── jni_bridge.cpp       # JNI 入口：Surface→ANativeWindow、Bitmap→像素缓冲
 ├── java/com/dsh/bodycam/
-│   ├── MainActivity.kt      # 界面、按键、拍照/录像调度、水印节拍
+│   ├── MainActivity.kt      # 界面、按键、拍照/录像调度、预录交接、水印节拍
+│   ├── SettingsActivity.kt  # 设置页：预录开关 + 预录时长
 │   ├── camera/CameraController.kt   # Camera2：预览流 + JPEG 流 + 录像中拍照
 │   ├── record/SegmentRecorder.kt    # MediaCodec 编码 + MediaMuxer 无缝分段
+│   ├── record/PreRecordBuffer.kt    # 预录：常驻编码器 + 环形帧队列 + 交接
+│   ├── record/CodecSupport.kt       # 两个 recorder 共用的编码器/音频采集样板
 │   ├── gl/WatermarkEngine.kt        # JNI 声明（与 jni_bridge.cpp 一一对应）
 │   ├── gl/GlPipeline.kt             # handle 生命周期封装
 │   ├── watermark/WatermarkPainter.kt    # Canvas 画时间/GPS/设备号（视频与照片共用）
@@ -77,9 +87,11 @@ app/src/main/
 │   ├── service/KeepAliveService.kt  # 息屏保活
 │   ├── key/GlobalKeyService.kt      # 可选：息屏也能用音量键（无障碍）
 │   ├── core/KeyRouter.kt            # 按键去抖与分发
+│   ├── core/SettingsStore.kt        # 预录设置读写 + 变更回调
 │   ├── core/AppConfig.kt            # 所有可调参数集中在这里
+│   ├── util/Rotation.kt             # Surface 旋转常量 → 角度
 │   └── util/Storage.kt              # 文件落盘
-└── res/                             # 布局、主题、图标、无障碍配置
+└── res/                             # 布局（主界面/设置页）、主题、图标、无障碍配置
 ```
 
 ---
@@ -105,7 +117,8 @@ Android/data/com.dsh.bodycam/files/BodyCam/videos/VID_yyyyMMdd_HHmmss_part00.mp4
 Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 ```
 
-`yyyyMMdd_HHmmss` 是**本次录制的开始时间**，所有分段共用同一前缀，`partNN` 递增。
+`yyyyMMdd_HHmmss` 是**按键开始录像的时间**（不是预录起点），所有分段共用同一前缀，
+`partNN` 递增。开了预录时，第一个分段的时长会比实际录像时长多出预录的那几秒。
 
 ---
 
@@ -116,6 +129,8 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 | 音量+ | 拍照（录像中也生效，闪光提示） |
 | 音量- | 开始 / 停止录像 |
 | 通知栏「停止录像」 | 停止并保存 |
+| 右上角 ⚙ | 进入设置页（预录开关与时长） |
+| 右上角黄点 | 仅表示「预录已开启」，与当前是否在录像无关 |
 
 **关于息屏按键**：安卓在屏幕关闭时会把音量键交给系统去调音量，普通 Activity
 收不到。本工程给了两条路：
@@ -176,7 +191,8 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 > 硬编码任何一边都会踩到另一边，所以把最后的校准交给现场，一次点选即可。
 
 确认后想固化：把那个 `R` 值填到 `AppConfig.ROTATION_OVERRIDE`（`-1` 表示自动），
-或者把 `MainActivity` 里 `rotationOffset` 的初值改成对应的偏移。
+或者改 `MainActivity.DEFAULT_ROTATION_OFFSET`（默认已按本机实测设为 `270`，
+也就是开箱即正向，不需要手动点；换机型再按需调整）。
 
 ---
 
@@ -219,14 +235,48 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 
 ---
 
+## 八点五、预录（按下录像键之前的画面与声音）
+
+执法场景里最关键的一刻，往往是掏设备、按下去之前那几秒。预录就是把这部分补回来。
+
+**入口**：主界面右上角 ⚙ → 设置页「预录功能」开关 + 预录时长（5 / 10 / 20 / 30 秒）。
+设置实时写入 `SharedPreferences`（`SettingsStore`），并回调主页面刷新。主界面右上角
+有个**黄点**，亮着就表示预录已开启，与当前是否正在录像无关。
+
+**做法**（`PreRecordBuffer`）：
+
+- 预录开启时，App 在预览阶段就**常驻一套视频 / 音频编码器**，相机帧同时画进预览
+  Surface 和预录 Surface（`renderer.setPreRecordWindow()`），编码结果只入内存，**不落盘**；
+- 视频帧进环形队列，按**帧数**保留 `(bufferSeconds + 1) × fps` 帧，队头始终对齐到
+  一个 I 帧，这样队首切出来的片段能独立解码；音频队列同步按时间窗裁剪；
+- 按下录像键时调用 `beginHandover(seconds)`：取出对齐后的尾部切片交给
+  `SegmentRecorder`，**视频编码器原样移交给正式录像继续用**（不重启、不丢帧），
+  音频编码器重建并把交接区间内的 AAC 帧先写进去；
+- 所以成片是**一个文件**，等于「预录 N 秒 + 之后的录像」，时间零点就是交接的第一帧；
+- muxer 尚未就绪（新音频编码器还没吐 `outputFormat`）期间，实时视频帧先缓存在
+  `pendingRealtimeVideo`（上限 60 帧）里，就绪后按序补写，避免开头出现空洞花屏。
+
+**代价**：预录开启时编码器与音频采集全程在跑，耗电和内存占用会增加。每秒内存开销约等于
+`码率/8`，30 秒 @12Mbps 的视频约 45MB，加上音频不到 50MB。所以设置页里默认是关的，
+并提供 5 秒这个省资源的档位。
+
+**注意**：录像期间预录缓存是停掉的（帧要留给正式录像编码器），停录后再自动恢复；
+转屏导致输出画幅变化时也会重启一次缓存，避免尺寸失配。
+
+**与分段的配合**：交接后进入正常的 `SegmentRecorder` 流程，30 分钟切片规则不变，
+预录内容只出现在第一个分段里。
+
+---
+
 ## 九、常改参数（`core/AppConfig.kt`）
 
 | 参数 | 说明 |
 | --- | --- |
 | `SEGMENT_SECONDS` | 分段长度，默认 `30 * 60`；调成 8 秒即可快速验证切片 |
 | `VIDEO_FPS` / `VIDEO_BITRATE` | 帧率与码率（默认 30fps / 12Mbps） |
+| `AUDIO_SILENT_THRESHOLD` | 录音峰值低于此值提示「基本没录到声音」（默认 50 / 满量程 32767） |
 | `WATERMARK_WIDTH` | 水印宽度占画面比例（0.60） |
-| `WATERMARK_LEFT` / `WATERMARK_BOTTOM` | 水印左下角边距（0.025 / 0.045） |
+| `WATERMARK_LEFT` / `WATERMARK_BOTTOM` | 水印左下角边距（0.045 / 0.045） |
 | `DEVICE_ID` | 水印上的设备编号，可改成警号 |
 | `KEEP_SCREEN_ON` | true 则常亮；默认 false，允许息屏继续录 |
 | `DEBUG_OVERLAY` | 左上角显示 `S/D/R` 与流/输出尺寸，定位方向问题用；正式使用建议关掉 |
@@ -247,8 +297,8 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 3. **Android 14+**：若把 `targetSdk` 提到 34，前台服务必须声明
    `FOREGROUND_SERVICE_CAMERA` / `FOREGROUND_SERVICE_MICROPHONE` 权限，
    并且要在用户可见时启动。
-4. **音频**：单声道 48kHz / 128kbps；需要双声道改 `SegmentRecorder` 里的
-   `CHANNELS` 与 `AudioFormat.CHANNEL_IN_MONO`。
+4. **音频**：单声道 48kHz / 128kbps；需要双声道改 `record/CodecSupport.kt` 里的
+   `CHANNELS` 与 `AudioFormat.CHANNEL_IN_MONO`（两个 recorder 共用这一份）。
 5. **MP4 尾部索引**（已修复）：早先用传统 MP4，`moov` 要等 `stop()` 才写，
    进程被强杀当前这段会整体报废。现已改用 **fMP4（分片 MP4）**，moov/mvex
    前置、数据按 `moof+mdat` 分片自包含——强杀后已写入的部分仍可直接播放，
@@ -259,18 +309,28 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 6. **方向上报不规范的机型**：极少数设备的 `SENSOR_ORIENTATION` 与实际成像不符，
    表现为画面整体差 90°。开 `DEBUG_OVERLAY` 看 `R`，用 `ROTATION_OVERRIDE`
    填相反角度即可（画幅仍然是竖屏），不需要改算法。
-7. **未做**：断点续录、加密存储、Wi-Fi 回传、GNSS 北斗原始数据。
+7. **预录的内存与功耗**：预录开启期间视频/音频编码器常驻，30 秒缓存约占 45MB 内存
+   （按 12Mbps 估算），同时持续耗电。低配机或长时间桌面放置时建议用 5 秒档或关闭。
+8. **预录只在预览阶段生效**：预录内容都落在当次录像的**第一个分段**里；如果录像中途
+   因分段换成第二个文件，预录部分不会出现在新分段中（语义上也不需要）。
+9. **未做**：断点续录、加密存储、Wi-Fi 回传、GNSS 北斗原始数据。
 
 ---
 
 ## 十一、调试建议
 
-- C++ 日志 tag：`BodyCamGL` / `BodyCamJNI`；Kotlin 侧分段日志 tag：`SegmentRecorder`
+- C++ 日志 tag：`BodyCamGL` / `BodyCamJNI`；Kotlin 侧分段日志 tag：`SegmentRecorder`，
+  预录日志 tag：`PreRecordBuffer`
   ```bash
-  adb logcat -s BodyCamGL BodyCamJNI SegmentRecorder
+  adb logcat -s BodyCamGL BodyCamJNI SegmentRecorder PreRecordBuffer
   ```
 - 验证分段：把 `AppConfig.SEGMENT_SECONDS` 临时改成 8，录 30 秒，`adb pull` 后应该
   得到 3~4 个 `partNN.mp4`，每个都能单独播放。
+- 验证预录：开启预录（10 秒），在预览界面停留 15 秒以上再按音量- 开始录像，录 5 秒后
+  停止。第一个分段的**总时长应约为 15 秒**（10 秒预录 + 5 秒），开头画面能正常播放，
+  不应出现花屏或从中间开始解不出来。日志里可核对 `PreRecordBuffer` 的
+  `slice: queue=N -> M frames, key=..., span=Xms` 与 `SegmentRecorder` 的
+  `wrote N handover video frames`。
 - 想确认水印确实烧进视频：录 10 秒后 `adb pull` 到电脑，用播放器打开暂停看左下角；
   或用 `ffprobe` 核对分辨率、码率、每段的 `rotation`。
 - 改 JNI 方法签名时，`WatermarkEngine.kt` 与 `jni_bridge.cpp` 必须同步改，
@@ -294,6 +354,9 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 | 音频时基 | 改用 CLOCK_BOOTTIME（与相机帧时间戳同一时基），修复机器休眠后音轨 0 样本的问题 |
 | 空闲水印时钟 | 常驻刷新，不再只在录像时走 |
 | 切后台再回前台 | 已修：`renderFrame` 在无绘制目标时也要 `updateTexImage()` 消费相机帧，否则缓冲队列堵死、回来黑屏；同时回前台重建预览会话 |
+| 预录交接 | 通过：预录 10 秒 + 录 5 秒，成片约 15 秒，单文件、开头可正常解码 |
+| 预录花屏 | 已修（待真机复验）：三处根因——(1) 编码器 PTS 回退到 `steady_clock` 与相机 `CLOCK_BOOTTIME` 混源；(2) 环形队列按时间窗裁剪会切在非 I 帧上；(3) muxer 就绪前的实时帧被直接丢弃。现改为 PTS 只在相机时间戳有效时出帧、按帧数裁剪并对齐关键帧、就绪前缓存至多 60 帧按序补写 |
+| 预录退出释放 | 通过：关闭预录或退出页面会销毁预录编码器与 `AudioRecord`，无明显常驻占用 |
 | lint | 0 error |
 
 > 模拟器的虚拟相机画面本身会缓慢变化，无法作为方向基准；方向的最终判定

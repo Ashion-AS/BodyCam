@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="title_settings">设置</string>
+    <string name="settings_pre_record_title">预录功能</string>
+    <string name="settings_pre_record_summary">开始录像前持续缓存画面，停录后一起保存</string>
+    <string name="settings_pre_record_duration_title">预录时长</string>
+    <string name="settings_pre_record_duration_fmt">%1$d 秒</string>
+    <string name="settings_pre_record_hint">预录同时缓存画面与声音；开启后耗电与内存占用会增加。</string>
+</resources>

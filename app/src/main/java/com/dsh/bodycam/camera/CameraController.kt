@@ -17,6 +17,7 @@ import android.os.HandlerThread
 import android.util.Log
 import android.util.Size
 import android.view.Surface
+import com.dsh.bodycam.util.rotationToDegrees
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -50,6 +51,9 @@ class CameraController(
     private var device: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var imageReader: ImageReader? = null
+
+    /** 会话代次：每建一个 CaptureSession +1，用于丢弃过期的 onConfigured 回调 */
+    private var sessionGen = 0
 
     @Volatile
     private var streaming = false
@@ -136,13 +140,17 @@ class CameraController(
     }
 
     private fun createSession(camera: CameraDevice) {
+        // 会话代次：startStreaming 是异步回调，若期间 restartPreview/setStreaming
+        // 已经关掉旧会话并建了新会话，旧回调必须丢弃——否则会把已关闭的
+        // session 赋回字段，随后的 setRepeatingRequest 抛 "Session has been closed"。
+        val gen = ++sessionGen
         val surfaces = mutableListOf(targetSurface)
         imageReader?.let { surfaces.add(it.surface) }
         try {
             camera.createCaptureSession(surfaces, object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(s: CameraCaptureSession) {
-                    Log.i(TAG, "onConfigured")
-                    if (released.get()) {
+                    Log.i(TAG, "onConfigured gen=$gen current=$sessionGen")
+                    if (released.get() || gen != sessionGen) {
                         s.close()
                         return
                     }
@@ -151,7 +159,7 @@ class CameraController(
                 }
 
                 override fun onConfigureFailed(s: CameraCaptureSession) {
-                    onError("创建相机会话失败")
+                    if (gen == sessionGen) onError("创建相机会话失败")
                 }
             }, handler)
         } catch (e: Exception) {
@@ -177,6 +185,12 @@ class CameraController(
             s.setRepeatingRequest(builder.build(), null, handler)
             streaming = true
             Log.i(TAG, "repeating request submitted")
+        } catch (e: IllegalStateException) {
+            // 会话已被关闭（竞态/系统掐断）：重建一次，而不是黑屏了事
+            Log.w(TAG, "session closed, recreate", e)
+            session = null
+            streaming = false
+            createSession(camera)
         } catch (e: Exception) {
             Log.w(TAG, "startStreaming failed", e)
             onError("启动预览失败：${e.message}")
@@ -208,6 +222,8 @@ class CameraController(
             }
             session = null
             streaming = false
+            // 让在途的 onConfigured 回调失效
+            sessionGen++
             createSession(camera)
         }
     }
@@ -217,7 +233,12 @@ class CameraController(
         Log.i(TAG, "setStreaming $enabled")
         handler.post {
             if (enabled) {
-                if (!streaming) startStreaming()
+                // 会话可能是旧的/已关闭的（后台被系统掐断），直接重建一次
+                if (!streaming) {
+                    val camera = device
+                    if (camera != null && session == null) createSession(camera)
+                    else startStreaming()
+                }
             } else if (streaming) {
                 try {
                     session?.stopRepeating()
@@ -275,12 +296,7 @@ class CameraController(
 
     /** 视频/照片需要写入的角度（后置相机公式） */
     fun orientationHint(): Int {
-        val deviceDegrees = when (rotationProvider()) {
-            Surface.ROTATION_90 -> 90
-            Surface.ROTATION_180 -> 180
-            Surface.ROTATION_270 -> 270
-            else -> 0
-        }
+        val deviceDegrees = rotationToDegrees(rotationProvider())
         return (spec.sensorOrientation - deviceDegrees + 360) % 360
     }
 

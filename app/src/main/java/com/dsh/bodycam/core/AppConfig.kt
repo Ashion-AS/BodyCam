@@ -11,7 +11,7 @@ object AppConfig {
     const val WATERMARK_WIDTH = 0.60f
 
     /** 水印左下角距离画面左边 / 下边的比例 */
-    const val WATERMARK_LEFT = 0.025f
+    const val WATERMARK_LEFT = 0.045f
     const val WATERMARK_BOTTOM = 0.045f
 
     /** 水印上的设备编号，可按需改成警号 */
@@ -39,4 +39,10 @@ object AppConfig {
     const val NOTIFICATION_CHANNEL_ID = "bodycam_recording"
     const val NOTIFICATION_ID = 1001
     const val ACTION_STOP_RECORD = "com.dsh.bodycam.action.STOP_RECORD"
+
+    /**
+     * 录音峰值低于此值视为「基本没录到声音」（16bit 满量程 32767）。
+     * 静音、被其它应用占用、权限问题都会落在几十以下，录完给个提示。
+     */
+    const val AUDIO_SILENT_THRESHOLD = 50
 }

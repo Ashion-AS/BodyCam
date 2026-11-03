@@ -58,6 +58,12 @@ public:
     /** 开关「是否往编码器画帧」 */
     void setRecording(bool recording);
 
+    /**
+     * 预录缓存编码器窗口（所有权转移）；传 nullptr 表示销毁。
+     * 与正式录像编码器互斥：预录开启时往这里画，录像开始时预录先停。
+     */
+    void setPreRecordWindow(ANativeWindow* window);
+
     /** 更新水印：像素为 RGBA_8888 预乘 alpha */
     void setWatermarkPixels(std::vector<uint8_t> pixels, int width, int height,
                             float leftFrac, float bottomFrac, float widthFrac);
@@ -98,8 +104,10 @@ private:
     EGLSurface pbuffer_ = EGL_NO_SURFACE;
     EGLSurface previewSurface_ = EGL_NO_SURFACE;
     EGLSurface encoderSurface_ = EGL_NO_SURFACE;
+    EGLSurface preRecordSurface_ = EGL_NO_SURFACE;
     ANativeWindow* previewWindow_ = nullptr;
     ANativeWindow* encoderWindow_ = nullptr;
+    ANativeWindow* preRecordWindow_ = nullptr;
     int previewW_ = 0;
     int previewH_ = 0;
 

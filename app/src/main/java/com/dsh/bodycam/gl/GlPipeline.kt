@@ -50,6 +50,14 @@ class GlPipeline(val videoWidth: Int, val videoHeight: Int) {
     }
 
     /**
+     * 预录缓存编码器：传非 null surface 时，每帧同时画到它上面（与正式
+     * 录像编码器互斥——录像开始时主页面会先停掉预录缓存再传 null）。
+     */
+    fun setPreRecordSurface(surface: Surface?) {
+        if (available) WatermarkEngine.nativeSetPreRecordSurface(handle, surface)
+    }
+
+    /**
      * 该调用是同步的：返回后渲染线程已经不再往编码器画帧，
      * 可以安全地调用 MediaRecorder.stop()。
      */

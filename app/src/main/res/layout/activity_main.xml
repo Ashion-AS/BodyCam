@@ -87,14 +87,40 @@
         android:shadowRadius="3"
         android:visibility="gone" />
 
-    <!-- 按钮放在右下角，避开左下角的水印区域 -->
+    <!-- 预录开启提示：黄点（预录开启时常亮） -->
+    <View
+        android:id="@+id/preRecordDot"
+        android:layout_width="10dp"
+        android:layout_height="10dp"
+        android:layout_gravity="top|end"
+        android:layout_marginEnd="16dp"
+        android:layout_marginTop="15dp"
+        android:background="@drawable/dot_pre_record"
+        android:visibility="gone" />
+
+    <!-- 设置入口：右上角齿轮符号 -->
+    <TextView
+        android:id="@+id/btnSettings"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginEnd="30dp"
+        android:layout_marginTop="8dp"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:padding="6dp"
+        android:text="⚙"
+        android:textColor="#CCFFFFFF"
+        android:textSize="18sp" />
+
+    <!-- 按钮竖向排布在右下角，避开左下角的水印区域 -->
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_marginEnd="24dp"
         android:layout_marginBottom="20dp"
-        android:orientation="horizontal">
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
 
         <TextView
             android:id="@+id/btnShutter"
@@ -110,7 +136,7 @@
             android:id="@+id/btnRecord"
             android:layout_width="76dp"
             android:layout_height="76dp"
-            android:layout_marginStart="20dp"
+            android:layout_marginTop="20dp"
             android:background="@drawable/bg_btn_record"
             android:gravity="center"
             android:text="@string/btn_record"
