@@ -15,7 +15,6 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 </p>
 
 > 左：实时预览（水印左下角，音量键控制）；右：拍照输出，方向已转正、水印已烧进画面。
-> 录制样例：[docs/sample_video.mp4](docs/sample_video.mp4)（含音轨）
 
 ---
 
@@ -31,7 +30,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 30 分钟自动分段 | `SegmentRecorder`：编码器不停，只换 MediaMuxer |
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
-| 预录开启提示 | 顶栏右侧**黄环**（`preRecordDot`），设置页可开关 |
+| 预录开启提示 | 顶栏右侧**黄点**（`preRecordDot`），设置页可开关 |
 
 ---
 
@@ -112,9 +111,9 @@ app/build/outputs/apk/debug/app-debug.apk
 文件输出目录（写进系统相册，相册和「文件」应用里都能直接看到）：
 
 ```
-Movies/BodyCam/VID_yyyyMMdd_HHmmss_part00.mp4
-              VID_yyyyMMdd_HHmmss_part01.mp4
-DCIM/BodyCam/  IMG_yyyyMMdd_HHmmss_SSS.jpg
+DCIM/BodyCam/VID_yyyyMMdd_HHmmss_part00.mp4
+             VID_yyyyMMdd_HHmmss_part01.mp4
+             IMG_yyyyMMdd_HHmmss_SSS.jpg
 ```
 
 API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `RELATIVE_PATH`，
@@ -138,7 +137,7 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
 | 音量- | 开始 / 停止录像 |
 | 通知栏「停止录像」 | 停止并保存 |
 | 顶栏右侧齿轮 | 进入设置页（预录开关与时长） |
-| 顶栏右侧黄环 | 仅表示「预录缓冲在跑」，与当前是否在录像无关 |
+| 顶栏右侧黄点 | 仅表示「预录缓冲在跑」，与当前是否在录像无关 |
 
 **关于息屏按键**：安卓在屏幕关闭时会把音量键交给系统去调音量，普通 Activity
 收不到。本工程给了两条路：
@@ -249,7 +248,7 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
 
 **入口**：主界面顶栏右侧齿轮 → 设置页「预录功能」开关 + 预录时长（5 / 10 / 20 / 30 秒）。
 设置实时写入 `SharedPreferences`（`SettingsStore`），并回调主页面刷新。主界面顶栏右侧
-有个**黄环**，亮着就表示预录缓冲在跑，与当前是否正在录像无关。
+有个**黄点**，亮着就表示预录缓冲在跑，与当前是否正在录像无关。
 
 **做法**（`PreRecordBuffer`）：
 
