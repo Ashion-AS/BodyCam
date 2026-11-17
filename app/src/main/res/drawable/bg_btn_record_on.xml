@@ -1,8 +1,31 @@
-<?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="#8E1B1B" />
-    <stroke
-        android:width="3dp"
-        android:color="#FFFFFF" />
-</shape>
+<!--
+  录像进行中：控件被「选中」，反过来填 paper_3 深底，用 2dp 红描边留住边界，
+  文字同时转红（rec_signal 对 paper_3 6.28:1）。
+  与未录像的红实心一暗一亮的反转，一眼可辨，且始终是同一个红信号，不引入第二种强调。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/paper_3" />
+            <stroke
+                android:width="@dimen/rule_strong"
+                android:color="@color/ink" />
+            <corners android:radius="@dimen/radius_control" />
+        </shape>
+    </item>
+
+    <item>
+        <ripple android:color="@color/ripple_on_paper">
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/paper_3" />
+                    <stroke
+                        android:width="@dimen/rule_strong"
+                        android:color="@color/rec_signal" />
+                    <corners android:radius="@dimen/radius_control" />
+                </shape>
+            </item>
+        </ripple>
+    </item>
+</selector>

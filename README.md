@@ -31,7 +31,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 30 分钟自动分段 | `SegmentRecorder`：编码器不停，只换 MediaMuxer |
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
-| 预录开启提示 | 主界面右上角**黄点**（`preRecordDot`），设置页可开关 |
+| 预录开启提示 | 顶栏右侧**黄环**（`preRecordDot`），设置页可开关 |
 
 ---
 
@@ -109,16 +109,24 @@ app/build/outputs/apk/debug/app-debug.apk
 `local.properties` 里的 `sdk.dir` 换成你自己的 SDK 路径；换 NDK 版本时同步改
 `app/build.gradle.kts` 的 `ndkVersion`。
 
-文件输出目录（不需要存储权限，`adb pull` 方便）：
+文件输出目录（写进系统相册，相册和「文件」应用里都能直接看到）：
 
 ```
-Android/data/com.dsh.bodycam/files/BodyCam/videos/VID_yyyyMMdd_HHmmss_part00.mp4
-                                                  VID_yyyyMMdd_HHmmss_part01.mp4
-Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
+Movies/BodyCam/VID_yyyyMMdd_HHmmss_part00.mp4
+              VID_yyyyMMdd_HHmmss_part01.mp4
+DCIM/BodyCam/  IMG_yyyyMMdd_HHmmss_SSS.jpg
 ```
+
+API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `RELATIVE_PATH`，
+改成直接写公共目录后再 `MediaScanner` 通知相册，这档会在首次启动时申请
+`WRITE_EXTERNAL_STORAGE`（清单里已用 `maxSdkVersion="28"` 卡住，29+ 不申请）。
 
 `yyyyMMdd_HHmmss` 是**按键开始录像的时间**（不是预录起点），所有分段共用同一前缀，
 `partNN` 递增。开了预录时，第一个分段的时长会比实际录像时长多出预录的那几秒。
+
+分段采用 fMP4（fragmented MP4）而不是传统 MP4：moof/mdat 分片自包含，
+进程被强杀或掉电时，已写入的部分仍可直接播放；传统 MP4 的 moov 要等正常收尾才落盘，
+强杀就整段报废。代价是最后不到 1 秒可能丢。
 
 ---
 
@@ -129,8 +137,8 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 | 音量+ | 拍照（录像中也生效，闪光提示） |
 | 音量- | 开始 / 停止录像 |
 | 通知栏「停止录像」 | 停止并保存 |
-| 右上角 ⚙ | 进入设置页（预录开关与时长） |
-| 右上角黄点 | 仅表示「预录已开启」，与当前是否在录像无关 |
+| 顶栏右侧齿轮 | 进入设置页（预录开关与时长） |
+| 顶栏右侧黄环 | 仅表示「预录缓冲在跑」，与当前是否在录像无关 |
 
 **关于息屏按键**：安卓在屏幕关闭时会把音量键交给系统去调音量，普通 Activity
 收不到。本工程给了两条路：
@@ -161,8 +169,8 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 
 ## 六点五、方向与画幅
 
-界面上那行小字（`S=.. D=.. R=..`）就是方向计算的全部输入，`AppConfig.DEBUG_OVERLAY`
-可关掉：
+顶栏下方那块等宽读数（`S=.. D=.. R=..`，带细描边面板）就是方向计算的全部输入，
+`AppConfig.DEBUG_OVERLAY` 可关掉：
 
 | 记号 | 含义 |
 | --- | --- |
@@ -177,7 +185,7 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 留黑边，所以竖屏下就是全屏竖屏画面。视频文件里没有 rotation 标记，任何播放器
 都按正向显示。
 
-**如果真机上预览/成片方向不对：不用改代码，直接点屏幕上那行小字。**
+**如果真机上预览/成片方向不对：不用改代码，直接点顶栏下方那块读数面板。**
 
 点一次校准角 +90°，在 `0 → 90 → 180 → 270` 之间循环，**只改变画面朝向，
 画幅始终是竖屏**。转到画面正了就停：
@@ -239,9 +247,9 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 
 执法场景里最关键的一刻，往往是掏设备、按下去之前那几秒。预录就是把这部分补回来。
 
-**入口**：主界面右上角 ⚙ → 设置页「预录功能」开关 + 预录时长（5 / 10 / 20 / 30 秒）。
-设置实时写入 `SharedPreferences`（`SettingsStore`），并回调主页面刷新。主界面右上角
-有个**黄点**，亮着就表示预录已开启，与当前是否正在录像无关。
+**入口**：主界面顶栏右侧齿轮 → 设置页「预录功能」开关 + 预录时长（5 / 10 / 20 / 30 秒）。
+设置实时写入 `SharedPreferences`（`SettingsStore`），并回调主页面刷新。主界面顶栏右侧
+有个**黄环**，亮着就表示预录缓冲在跑，与当前是否正在录像无关。
 
 **做法**（`PreRecordBuffer`）：
 
@@ -360,7 +368,7 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 | lint | 0 error |
 
 > 模拟器的虚拟相机画面本身会缓慢变化，无法作为方向基准；方向的最终判定
-> 以真机为准。若真机上整体差 90°，按「六点五」点那行小字校准即可。
+> 以真机为准。若真机上整体差 90°，按「六点五」点那块读数面板校准即可。
 
 ---
 
@@ -369,6 +377,20 @@ Android/data/com.dsh.bodycam/files/BodyCam/photos/IMG_yyyyMMdd_HHmmss_SSS.jpg
 - 全部 Kotlin，包名 `com.dsh.bodycam`，按职责分包：`camera` / `record` / `gl` / `watermark` / `service` / `key` / `core` / `util`
 - 缩进 4 空格、UTF-8、LF；规则见 `.editorconfig`、`.gitattributes`
 - 不引入任何第三方依赖（无 AndroidX），减少体积与构建变量
+- **界面颜色、字号、间距一律走令牌**：`res/values/colors.xml`、`dimens.xml`、`styles.xml`。
+  布局和 drawable 里不写十六进制色值，也不写 `13sp` 这种游离字号——真要加一档，
+  先往令牌文件里加。
+- 配色语义固定，不要混用：**红 = 录像这件事本身**（录像主控件、计时数字、REC 圆点），
+  **黄 = 仪器**（预录缓冲在跑），**琥珀 = 通用交互**（选中、焦点、开关、单选）。
+  其余都是中性层（`paper` / `ink` / `rule`）。
+- 红拆了两档，不要合并：`rec_fill` 做实心按钮底（够暗才衬得住白字，4.87:1），
+  `rec_signal` 做深底上的文字与描边（够亮才在 paper 上看得见，5.98:1）。
+- 文字只有两副嗓子：`sans-serif-medium` 给人读的词（按钮、设置项），
+  `monospace` 给仪器写出来的读数（分辨率、帧率、计时、S/D/R 校准值）。
+- 控件视觉高度可以小于 48dp，但可点区域不小于 `@dimen/touch_target`；
+  每个可交互控件都要有焦点态（键盘/开关控制下能看见选中的是哪个）。
+- 可交互控件背景用 `<selector>`，必须带 `state_focused` 分支，按下态走 `<ripple>`；
+  只写静态 `<shape>` 的控件在键盘或无障碍聚焦时看不出选中。
 - 提交前建议跑一遍：
 
   ```bash

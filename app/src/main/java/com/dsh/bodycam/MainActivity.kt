@@ -33,7 +33,6 @@ import com.dsh.bodycam.watermark.PhotoWatermarker
 import com.dsh.bodycam.watermark.Telemetry
 import com.dsh.bodycam.watermark.WatermarkData
 import com.dsh.bodycam.watermark.WatermarkPainter
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -304,6 +303,12 @@ class MainActivity : Activity(), KeyRouter.Listener {
         ) {
             needed += Manifest.permission.POST_NOTIFICATIONS
         }
+        // API 26-28 写公共相册要这个；29+ 走 MediaStore 不需要，清单里也卡了 maxSdkVersion
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            !granted(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        ) {
+            needed += Manifest.permission.WRITE_EXTERNAL_STORAGE
+        }
         if (needed.isEmpty()) {
             setup()
         } else {
@@ -383,7 +388,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
             p.setPreviewWindow(previewView.holder.surface, previewView.width, previewView.height)
         }
 
-        statusView.text = "${videoW}×${videoH} · ${AppConfig.VIDEO_FPS}fps"
+        statusView.text = getString(R.string.readout_fmt, videoW, videoH, AppConfig.VIDEO_FPS)
         updateDebugInfo()
         updateWatermark()
         applyPreRecordSetting()
@@ -456,7 +461,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
         }
         pipeline?.setRotation(rotationDeg.toFloat())
         if (this::statusView.isInitialized) {
-            statusView.text = "${videoW}×${videoH} · ${AppConfig.VIDEO_FPS}fps"
+            statusView.text = getString(R.string.readout_fmt, videoW, videoH, AppConfig.VIDEO_FPS)
         }
         updateDebugInfo()
     }
@@ -478,9 +483,11 @@ class MainActivity : Activity(), KeyRouter.Listener {
             return
         }
         debugView.visibility = View.VISIBLE
-        debugView.text = "S=$sensorOrientation D=${displayDegrees()} R=$rotationDeg " +
-                "(校准$rotationOffset)  " +
-                "流=${streamW}x$streamH 输出=${videoW}x$videoH\n点这里校准方向"
+        debugView.text = getString(
+            R.string.debug_readout_fmt,
+            sensorOrientation, displayDegrees(), rotationDeg, rotationOffset,
+            streamW, streamH, videoW, videoH
+        )
     }
 
     @Suppress("DEPRECATION")
@@ -531,10 +538,11 @@ class MainActivity : Activity(), KeyRouter.Listener {
             val stamped = runCatching {
                 PhotoWatermarker.watermark(bytes, WatermarkPainter(), data, rotation)
             }.getOrDefault(bytes)
-            val file = runCatching { Storage.savePhoto(this, stamped) }.getOrNull()
+            val name = "IMG_${Storage.stamp()}.jpg"
+            val saved = runCatching { Storage.savePhoto(this, stamped, name) }.getOrNull()
             runOnUiThread {
                 toast(
-                    if (file != null) getString(R.string.photo_saved, file.name)
+                    if (saved != null) getString(R.string.photo_saved, saved)
                     else getString(R.string.photo_failed)
                 )
             }
@@ -653,11 +661,11 @@ class MainActivity : Activity(), KeyRouter.Listener {
     }
 
     /** 录制文件已收尾：提示结果并重新拉起预录缓存（在 UI 线程） */
-    private fun onSegmentSaved(files: List<File>, micPeak: Int) {
+    private fun onSegmentSaved(files: List<Storage.Entry>, micPeak: Int) {
         if (isDestroyed) return
         toast(
             if (files.isEmpty()) getString(R.string.video_failed)
-            else getString(R.string.video_saved, files.size, files.last().name)
+            else getString(R.string.video_saved, files.size, files.last().displayName)
         )
         // 麦克风峰值极低基本等于没录到声音（静音/被占用/权限问题），提示一下
         if (files.isNotEmpty() && micPeak < AppConfig.AUDIO_SILENT_THRESHOLD) {
@@ -698,7 +706,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
 
     private fun updateTimer() {
         if (!recording) {
-            timerView.text = "00:00:00"
+            timerView.text = getString(R.string.timer_zero)
             return
         }
         timerView.text = formatDuration(SystemClock.elapsedRealtime() - recordStartElapsed)
@@ -716,6 +724,8 @@ class MainActivity : Activity(), KeyRouter.Listener {
         btnRecord.setBackgroundResource(
             if (recording) R.drawable.bg_btn_record_on else R.drawable.bg_btn_record
         )
+        // 未录像：红实心 + 白字；录像中：反过来，深底 + 红字
+        btnRecord.setTextColor(getColor(if (recording) R.color.rec_signal else R.color.ink))
         recDot.visibility = if (recording) View.VISIBLE else View.INVISIBLE
         timerView.visibility = if (recording) View.VISIBLE else View.GONE
         hintView.visibility = if (recording) View.GONE else View.VISIBLE

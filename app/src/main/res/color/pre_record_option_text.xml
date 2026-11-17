@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 选中态用琥珀（与背后的 accent_soft 底配套），未选中用 ink_2 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_checked="true" android:color="#FFD54F" />
-    <item android:color="#DDFFFFFF" />
+    <item android:state_checked="true" android:color="@color/accent" />
+    <item android:color="@color/ink_2" />
 </selector>

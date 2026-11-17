@@ -51,7 +51,16 @@ class SettingsActivity : Activity() {
                 setTextColor(resources.getColorStateList(R.color.pre_record_option_text, theme))
                 setButtonDrawable(null)
                 setBackgroundResource(R.drawable.bg_pre_record_option)
-                setPadding(28, 18, 28, 18)
+                // 分段控件的一个格子：48dp 高保证可点，视觉宽度随文字
+                minHeight = resources.getDimensionPixelSize(R.dimen.touch_target)
+                minWidth = resources.getDimensionPixelSize(R.dimen.touch_target)
+                gravity = android.view.Gravity.CENTER
+                setPadding(
+                    resources.getDimensionPixelSize(R.dimen.space_sm),
+                    0,
+                    resources.getDimensionPixelSize(R.dimen.space_sm),
+                    0
+                )
                 isChecked = seconds == current
                 tag = seconds
             }
@@ -59,7 +68,7 @@ class SettingsActivity : Activity() {
                 RadioGroup.LayoutParams.WRAP_CONTENT,
                 RadioGroup.LayoutParams.WRAP_CONTENT
             )
-            lp.marginEnd = 20
+            lp.marginEnd = resources.getDimensionPixelSize(R.dimen.space_xs)
             rgDuration.addView(rb, lp)
         }
         rgDuration.setOnCheckedChangeListener { _, checkedId ->
@@ -74,9 +83,14 @@ class SettingsActivity : Activity() {
         }
     }
 
-    /** 关闭预录时长选择区变灰 */
+    /** 关闭预录时，时长区降到 40% 不透明度并整体不可点 */
     private fun updateSections() {
-        durationSection.alpha = if (swPreRecord.isChecked) 1f else 0.4f
-        durationSection.isEnabled = swPreRecord.isChecked
+        val on = swPreRecord.isChecked
+        durationSection.alpha = if (on) 1f else 0.4f
+        durationSection.isEnabled = on
+        rgDuration.isEnabled = on
+        for (i in 0 until rgDuration.childCount) {
+            rgDuration.getChildAt(i).isEnabled = on
+        }
     }
 }

@@ -7,11 +7,11 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import com.dsh.bodycam.util.Storage
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -96,13 +96,14 @@ class SegmentRecorder(private val context: Context) {
     private var orientationHint = 0
     private var segmentIndex = 0
     private var nameBase = ""
-    private val files = ArrayList<File>()
+    private val files = ArrayList<Storage.Entry>()
 
     /** 当前分段写入了多少个样本；为 0 说明只是建了个空壳文件 */
     private var segmentSamples = 0L
     private var audioSamples = 0L
     private var audioBytes = 0L
-    private var currentFile: File? = null
+    private var currentEntry: Storage.Entry? = null
+    private var currentFd: ParcelFileDescriptor? = null
 
     /** 本次录制期间麦克风的最大峰值（0~32767）；很小说明基本没录到声音 */
     @Volatile
@@ -208,8 +209,8 @@ class SegmentRecorder(private val context: Context) {
         }
     }
 
-    /** 停止录制，返回本次产生的所有分段文件 */
-    fun stop(): List<File> {
+    /** 停止录制，返回本次产生的所有分段 */
+    fun stop(): List<Storage.Entry> {
         if (!started) return emptyList()
         started = false
         stopping = true
@@ -244,10 +245,8 @@ class SegmentRecorder(private val context: Context) {
         releaseInternal()
 
         return synchronized(lock) {
-            // 清掉没写进任何帧的空文件（例如刚开始录就立刻停止）
-            val (valid, empty) = files.partition { it.exists() && it.length() > 0 }
-            empty.forEach { it.delete() }
-            valid
+            // 空分段在 closeMuxerLocked 里已经 abort 掉了，这里剩下的都写过帧
+            files.toList()
         }
     }
 
@@ -609,18 +608,30 @@ class SegmentRecorder(private val context: Context) {
     }
 
     private fun createMuxerLocked() {
-        val dir = Storage.videoDir(context)
         val name = "VID_${nameBase}_part${String.format(Locale.US, "%02d", segmentIndex)}.mp4"
-        val file = File(dir, name)
+        val entry = Storage.createVideo(context, name)
+        if (entry == null) {
+            Log.e(TAG, "create entry failed: $name")
+            return
+        }
+        val fd = entry.openReadWrite()
+        if (fd == null) {
+            Log.e(TAG, "open fd failed: $name")
+            entry.abort()
+            return
+        }
         val muxer = try {
             // 用 fMP4 而非传统 MP4：moov/mvex 前置、数据按 moof+mdat 分片自包含，
             // 进程被强杀时已写入的 fragment 仍可直接播放（只有最后不到 1 秒可能丢）。
             // 传统 MP4 的 moov 要等 stop() 才落盘，强杀就整段报废。
-            MediaMuxer(file.absolutePath, fragmentedFormat()).apply {
+            // 写 fd 而不是路径：相册条目（MediaStore）拿不到可写路径。
+            MediaMuxer(fd.fileDescriptor, fragmentedFormat()).apply {
                 setOrientationHint(orientationHint)
             }
         } catch (e: Exception) {
             Log.e(TAG, "create muxer failed", e)
+            runCatching { fd.close() }
+            entry.abort()
             return
         }
         this.muxer = muxer
@@ -628,8 +639,9 @@ class SegmentRecorder(private val context: Context) {
         videoTrack = -1
         audioTrack = -1
         segmentSamples = 0L
-        currentFile = file
-        files.add(file)
+        currentEntry = entry
+        currentFd = fd
+        files.add(entry)
     }
 
     private fun startMuxerIfReadyLocked() {
@@ -691,13 +703,21 @@ class SegmentRecorder(private val context: Context) {
         videoTrack = -1
         audioTrack = -1
 
-        // 一帧都没写进去的分段（点了就停）直接删掉，避免留下几 KB 的空壳文件
-        val file = currentFile
-        if (segmentSamples == 0L && file != null) {
-            runCatching { file.delete() }
-            files.remove(file)
+        // 先关 fd 再收尾条目：MediaMuxer 释放后 fd 仍由我们自己持有
+        runCatching { currentFd?.close() }
+        currentFd = null
+
+        val entry = currentEntry
+        if (entry != null) {
+            // 一帧都没写进去的分段（点了就停）直接撤掉，避免相册里留下空壳
+            if (segmentSamples == 0L) {
+                entry.abort()
+                files.remove(entry)
+            } else {
+                entry.commit()
+            }
         }
-        currentFile = null
+        currentEntry = null
         segmentSamples = 0L
     }
 

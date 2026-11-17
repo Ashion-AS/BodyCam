@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  尺寸令牌：间距、字号、圆角、控件高度。
+
+  字号按 1.125 左右的比例递进（12 / 14 / 16 / 18sp），只在有明确角色的
+  地方加一档，不要临时写个 13sp。
+  控件视觉高度可以小，但可点区域一律不小于 touch_target（48dp）。
+-->
+<resources>
+
+    <!-- 间距 -->
+    <dimen name="space_3xs">2dp</dimen>
+    <dimen name="space_2xs">4dp</dimen>
+    <dimen name="space_xs">8dp</dimen>
+    <dimen name="space_sm">12dp</dimen>
+    <dimen name="space_md">16dp</dimen>
+    <dimen name="space_lg">24dp</dimen>
+    <dimen name="space_xl">32dp</dimen>
+
+    <!-- 字号 -->
+    <dimen name="text_sm">12sp</dimen>
+    <dimen name="text_md">14sp</dimen>
+    <dimen name="text_lg">16sp</dimen>
+    <dimen name="text_xl">18sp</dimen>
+
+    <!-- 圆角与线宽 -->
+    <dimen name="radius_control">10dp</dimen>
+    <dimen name="radius_panel">10dp</dimen>
+    <dimen name="rule_hair">1dp</dimen>
+    <dimen name="rule_strong">2dp</dimen>
+
+    <!-- 结构尺寸 -->
+    <dimen name="touch_target">48dp</dimen>
+    <dimen name="top_bar_height">56dp</dimen>
+    <dimen name="control_size">64dp</dimen>
+    <dimen name="status_dot">8dp</dimen>
+
+</resources>

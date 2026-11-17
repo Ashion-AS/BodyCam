@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  设置页的一行：paper_2 底 + 一条 1dp rule 底边。
+  行与行直接相接时，这条线就是它们之间唯一的分隔——不叠卡片、不加投影。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/paper_2" />
+        </shape>
+    </item>
+    <item
+        android:gravity="bottom"
+        android:height="@dimen/rule_hair">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/rule" />
+        </shape>
+    </item>
+</layer-list>

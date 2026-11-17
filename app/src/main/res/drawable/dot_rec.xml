@@ -1,8 +1,17 @@
-<?xml version="1.0" encoding="utf-8"?>
+<!--
+  录制状态点。静止，不闪不呼吸：一个一直眨的红点会跟预览画面抢注意力，
+  而且执法场景下持续动效会干扰判断。状态已经由计时器和按钮形态表达了。
+
+  红点坐在 50% 顶栏上，白画面时红对底只有 1.1:1，靠一圈 paper_3 深描边
+  把点从画面里框出来（深描边对白画面 5.6:1）。
+-->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="oval">
-    <solid android:color="#FF3B30" />
+    <solid android:color="@color/rec_signal" />
+    <stroke
+        android:width="@dimen/rule_hair"
+        android:color="@color/paper_3" />
     <size
-        android:width="10dp"
-        android:height="10dp" />
+        android:width="@dimen/status_dot"
+        android:height="@dimen/status_dot" />
 </shape>

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  BodyCam 配色令牌（Console 主题：graphite 三层明度 + 红信号 + 黄状态 + 琥珀交互色）
+
+  语义分工，改动前先读这段：
+    红 rec_fill / rec_signal = 录像这件事本身（主控件实心底、计时数字、REC 圆点）
+    黄 status_pre           = 仪器在跑的预录缓冲
+    琥珀 accent             = 通用交互：选中、焦点、开关、单选
+    其余都是不带含义的中性层：paper / ink / rule
+
+  红拆成两个是因为职责冲突：做实心底的那档必须够暗（衬白字），
+  做深底上文字的那档必须够亮（衬 paper），一个红满足不了两边。
+     rec_fill  #C62828 配 ink 4.87:1（AA 正文）
+     rec_signal #FF5252 对 paper 5.98:1、对 paper_3 6.28:1
+
+  所有界面颜色只能引用这里，不要在布局或 drawable 里写死十六进制。
+-->
+<resources>
+
+    <!-- 三层明度：paper 是最深的地，paper_2 抬一层，paper_3 再深一层（视频画布与深底用） -->
+    <color name="paper">#0D1013</color>
+    <color name="paper_2">#15191C</color>
+    <color name="paper_3">#06080B</color>
+
+    <!-- 墨色：ink 正文、ink_2 次级、muted 标签与测量值 -->
+    <color name="ink">#ECEFF2</color>
+    <color name="ink_2">#C3C8CC</color>
+    <color name="muted">#9DA2A8</color>
+
+    <!-- 分隔线：rule 常规 1dp、rule_2 描边与次要控件边界 -->
+    <color name="rule">#802D3135</color>
+    <color name="rule_2">#484E54</color>
+
+    <!-- 琥珀：通用交互色，给选中/焦点/开关/单选这类「操作中」的反馈 -->
+    <color name="accent">#F7B83D</color>
+    <color name="accent_soft">#38280A</color>
+
+    <!--
+      红：录像这件事本身。拆两档是因为职责冲突——
+      做按钮实心底的那档必须够暗（衬白字），做深底上文字的那档必须够亮。
+    -->
+    <color name="rec_fill">#C62828</color>
+    <color name="rec_fill_focus">#7F1D1D</color>
+    <color name="rec_signal">#FF5252</color>
+
+    <!-- 黄：只表示仪器状态（预录缓冲运行中） -->
+    <color name="status_pre">#FFD54F</color>
+
+    <!--
+      覆盖层。顶栏与顶栏下方读数面板按指定用 50% 不透明。
+      50% 在亮画面上不足以让 muted 达到 4.5:1（白墙时只有 1.4:1），
+      所以这两处的文字另带一道投影兜底，见 values/styles.xml。
+
+      顶栏上的状态圆点因此也吃到这个损耗：黄点压在白墙上只有 2.5:1。
+      补救办法是圆点自己带 paper_3 实底（见 dot_pre_record），
+      环色只需要跟这层深底对比——那有 14:1。
+
+      scrim_well 仍是接近实底：拍照键与计时器在画面下方，不参与半透明，
+      它们的文字必须不靠投影也读得清。
+    -->
+    <color name="scrim_bar">#800D1013</color>
+    <color name="scrim_panel">#800D1013</color>
+    <color name="scrim_well">#E60D1013</color>
+
+    <!-- 纯白仅用于快门闪光：那是功能性的全屏闪一下，不是配色 -->
+    <color name="flash">#FFFFFF</color>
+
+    <!--
+      盖在视频上的文字投影色。不能写死 #000，这里留一点蓝，和 paper 同源。
+
+      text_glow 比 text_shadow 更实：给红色计时用。红在浅底上对比度极低，
+      需要把字紧邻一圈压到 near-black，投影浓度就得上去。
+    -->
+    <color name="text_shadow">#BB000000</color>
+    <color name="text_glow">#ED000000</color>
+
+    <!-- 按下反馈的水波颜色，与所在控件的墨色/信号色同源 -->
+    <color name="ripple_on_paper">#33ECEFF2</color>
+
+</resources>

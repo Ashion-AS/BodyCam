@@ -1,6 +1,16 @@
-<?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
-    <solid android:color="#FFD54F" />
-    <stroke android:width="1dp" android:color="#66000000" />
-    <size android:width="10dp" android:height="10dp" />
+<!--
+  预录缓冲运行中：黄环。仪器在跑，不是人在录。
+  这枚点坐在 50% 不透明的顶栏上，白画面时环色只有 2.5:1，
+  所以它自带 paper_3 实底把环包起来——环对深底 14:1，深底再对画面
+  提供边界（对白画面 5.6:1）。两者合起来在明暗画面上都立得住。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/status_pre" />
+    <stroke
+        android:width="@dimen/rule_strong"
+        android:color="@color/status_pre" />
+    <size
+        android:width="@dimen/status_dot"
+        android:height="@dimen/status_dot" />
 </shape>

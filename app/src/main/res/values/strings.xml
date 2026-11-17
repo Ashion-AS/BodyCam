@@ -5,8 +5,12 @@
     <string name="btn_capture">拍照</string>
     <string name="btn_record">录像</string>
     <string name="btn_stop">停止</string>
-    <string name="hint_keys">音量+ 拍照 · 音量- 开始/停止录像</string>
+    <string name="hint_keys">音量+ 拍照\n音量- 开始/停止录像</string>
     <string name="status_booting">相机准备中…</string>
+    <string name="timer_zero">00:00:00</string>
+    <string name="readout_fmt">%1$d×%2$d %3$dfps</string>
+    <string name="glyph_back">←</string>
+    <string name="action_back">返回</string>
 
     <string name="need_permission">需要相机与录音权限才能工作</string>
     <string name="no_camera">没有找到可用的摄像头</string>
@@ -21,7 +25,8 @@
     <string name="record_init_failed">录像初始化失败</string>
     <string name="record_saving">正在保存上一段，请稍候</string>
     <string name="audio_silent">注意：本次录像几乎没有声音（麦克风峰值 %1$d）</string>
-    <string name="rotation_offset">校准 +%1$d° → R=%2$d，输出 %3$d×%4$d</string>
+    <string name="rotation_offset">校准 +%1$d°  R=%2$d  输出 %3$d×%4$d</string>
+    <string name="debug_readout_fmt">S=%1$d D=%2$d R=%3$d\n校准 %4$d°  流 %5$d×%6$d\n输出 %7$d×%8$d  点此校准</string>
 
     <string name="channel_name">录像状态</string>
     <string name="channel_desc">录像时保持相机与麦克风在后台运行</string>

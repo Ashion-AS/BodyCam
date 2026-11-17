@@ -1,10 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  主界面 = 取景器。除了一条顶栏和右下两个控件，屏幕上不该有别的浮层。
+
+  分区（和为什么）：
+    顶栏   56dp 的信息带：左「仪器读数 + 按键提示」，中「计时」，右「仪器状态 + 设置」
+    左下   留给水印（由 GL 直接烧进画面，不在布局里）
+    右下   两个控件竖向排布：次要在上（拍照），主控件在下（录像），单手握持拇指行程最短
+    顶栏下 调试校准行，可点，只给现场校准方向用
+
+  所有颜色 / 字号 / 间距都来自 values/colors.xml、dimens.xml、styles.xml，
+  这里不出现任何写死的颜色值。
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#000000">
+    android:background="@color/paper">
 
-    <!-- OpenGL 直接往这个 Surface 上画（相机画面 + 水印） -->
+    <!-- OpenGL 直接往这个 Surface 上画：相机画面 + 烧进去的水印 -->
     <SurfaceView
         android:id="@+id/preview"
         android:layout_width="match_parent"
@@ -16,141 +28,160 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:alpha="0"
-        android:background="#FFFFFF" />
+        android:background="@color/flash" />
 
-    <!-- 顶栏：左状态、中计时、右预录黄点 + 设置入口 -->
-    <FrameLayout
+    <!-- 顶栏与校准行同一列自上而下排，不用魔法偏移去猜顶栏高度 -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:background="#66000000"
-        android:paddingHorizontal="16dp"
-        android:paddingVertical="10dp">
+        android:orientation="vertical">
 
-        <!-- 左：录制红点 + 状态文字 -->
-        <LinearLayout
-            android:layout_width="wrap_content"
+        <!-- 顶栏：与画面之间只用一条 1dp 分隔线，不投影、不做玻璃 -->
+        <FrameLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="start|center_vertical"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:background="@drawable/bg_top_bar"
+            android:minHeight="@dimen/top_bar_height"
+            android:paddingHorizontal="@dimen/space_md"
+            android:paddingVertical="@dimen/space_xs">
 
-            <TextView
-                android:id="@+id/statusView"
+            <!-- 左：读数与按键提示，两行等宽字体 -->
+            <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/status_booting"
-                android:textColor="#E8EEF6"
-                android:textSize="13sp" />
+                android:layout_gravity="start|center_vertical"
+                android:orientation="vertical">
 
-            <View
-                android:id="@+id/recDot"
-                android:layout_width="10dp"
-                android:layout_height="10dp"
-                android:layout_marginStart="5dp"
-                android:background="@drawable/dot_rec"
-                android:visibility="invisible" />
-        </LinearLayout>
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
-        <!-- 中：录像计时（始终居中，不受左右控件影响） -->
-        <TextView
-            android:id="@+id/timerView"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:fontFamily="monospace"
-            android:text="00:00:00"
-            android:textColor="#FF5252"
-            android:textSize="16sp"
-            android:visibility="gone" />
+                    <TextView
+                        android:id="@+id/statusView"
+                        style="@style/BodyCamInstrumentOverlay"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/status_booting" />
 
-        <!-- 右：预录黄点 + 设置按钮（同一行，水平对齐） -->
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="end|center_vertical"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+                    <View
+                        android:id="@+id/recDot"
+                        android:layout_width="@dimen/status_dot"
+                        android:layout_height="@dimen/status_dot"
+                        android:layout_marginStart="@dimen/space_xs"
+                        android:background="@drawable/dot_rec"
+                        android:visibility="invisible" />
+                </LinearLayout>
 
-            <!-- 预录开启提示：黄点（预录开启时常亮） -->
-            <View
-                android:id="@+id/preRecordDot"
-                android:layout_width="10dp"
-                android:layout_height="10dp"
-                android:background="@drawable/dot_pre_record"
+                <TextView
+                    android:id="@+id/hintView"
+                    style="@style/BodyCamHintOverlay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_3xs"
+                    android:text="@string/hint_keys" />
+            </LinearLayout>
+
+            <!--
+              中：录像计时。始终居中，不受左右内容宽度影响。
+              红字靠深色投影把紧邻的一圈压暗来立住，不垫底色块，也不描边（描边会加粗字形）。
+            -->
+            <TextView
+                android:id="@+id/timerView"
+                style="@style/BodyCamInstrumentLargeOverlay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:text="@string/timer_zero"
                 android:visibility="gone" />
 
-            <ImageView
-                android:id="@+id/btnSettings"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:layout_marginStart="10dp"
-                android:background="?android:attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/title_settings"
-                android:src="@drawable/ic_settings" />
-        </LinearLayout>
-    </FrameLayout>
+            <!-- 右：预录缓冲状态 + 设置入口 -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|center_vertical"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
 
-    <TextView
-        android:id="@+id/hintView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|start"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="52dp"
-        android:shadowColor="#CC000000"
-        android:shadowDx="0"
-        android:shadowDy="1"
-        android:shadowRadius="4"
-        android:text="@string/hint_keys"
-        android:textColor="#DDFFFFFF"
-        android:textSize="11sp" />
+                <!-- 黄环：预录缓冲在跑。这是仪器状态，不是录像状态 -->
+                <View
+                    android:id="@+id/preRecordDot"
+                    android:layout_width="@dimen/status_dot"
+                    android:layout_height="@dimen/status_dot"
+                    android:background="@drawable/dot_pre_record"
+                    android:visibility="gone" />
 
-    <TextView
-        android:id="@+id/debugView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|start"
-        android:layout_marginStart="16dp"
-        android:layout_marginTop="76dp"
-        android:fontFamily="monospace"
-        android:shadowColor="#CC000000"
-        android:shadowDx="0"
-        android:shadowDy="1"
-        android:shadowRadius="3"
-        android:textColor="#B3FFFFFF"
-        android:textSize="10sp"
-        android:visibility="gone" />
+                <ImageView
+                    android:id="@+id/btnSettings"
+                    android:layout_width="@dimen/touch_target"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="@dimen/space_xs"
+                    android:background="@drawable/bg_icon_button"
+                    android:contentDescription="@string/title_settings"
+                    android:focusable="true"
+                    android:padding="@dimen/space_sm"
+                    android:src="@drawable/ic_settings" />
+            </LinearLayout>
+        </FrameLayout>
 
-    <!-- 按钮竖向排布在右下角，避开左下角的水印区域 -->
+        <!--
+          方向校准行：现场定位方向问题用，点一次 +90°。
+          它承载真实读数（S/D/R、流与输出尺寸），不是装饰文字。
+        -->
+        <TextView
+            android:id="@+id/debugView"
+            style="@style/BodyCamInstrumentOverlay"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_md"
+            android:layout_marginTop="@dimen/space_xs"
+            android:background="@drawable/bg_panel"
+            android:clickable="true"
+            android:focusable="true"
+            android:lineSpacingExtra="@dimen/space_3xs"
+            android:paddingHorizontal="@dimen/space_sm"
+            android:paddingVertical="@dimen/space_xs"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!--
+      右下：次要控件在上（拍照），主控件在下（录像）。
+      竖向排布是为了把左下角整块让给水印，不与之抢位置。
+    -->
     <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
-        android:layout_marginEnd="24dp"
-        android:layout_marginBottom="20dp"
+        android:layout_marginEnd="@dimen/space_lg"
+        android:layout_marginBottom="@dimen/space_lg"
         android:gravity="center_horizontal"
         android:orientation="vertical">
 
         <TextView
             android:id="@+id/btnShutter"
-            android:layout_width="76dp"
-            android:layout_height="76dp"
+            style="@style/BodyCamLabel"
+            android:layout_width="@dimen/control_size"
+            android:layout_height="@dimen/control_size"
             android:background="@drawable/bg_btn_capture"
+            android:clickable="true"
+            android:focusable="true"
             android:gravity="center"
-            android:text="@string/btn_capture"
-            android:textColor="#FFFFFF"
-            android:textSize="15sp" />
+            android:text="@string/btn_capture" />
 
         <TextView
             android:id="@+id/btnRecord"
-            android:layout_width="76dp"
-            android:layout_height="76dp"
-            android:layout_marginTop="20dp"
+            style="@style/BodyCamLabel"
+            android:layout_width="@dimen/control_size"
+            android:layout_height="@dimen/control_size"
+            android:layout_marginTop="@dimen/space_lg"
             android:background="@drawable/bg_btn_record"
+            android:clickable="true"
+            android:focusable="true"
             android:gravity="center"
             android:text="@string/btn_record"
-            android:textColor="#FFFFFF"
-            android:textSize="15sp" />
+            android:textColor="@color/ink" />
     </LinearLayout>
+
 </FrameLayout>

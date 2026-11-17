@@ -1,8 +1,28 @@
-<?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="oval">
-    <solid android:color="#E53935" />
-    <stroke
-        android:width="2dp"
-        android:color="#80FFFFFF" />
-</shape>
+<!--
+  主控件：录像，未在录。红实心底 + 白字，4.87:1。
+  全屏唯一的实心红，表示「按下就开始录这件事」。
+  聚焦时底色压深一档（rec_fill_focus），描边提到 2dp ink，焦点圈和底都看得见。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/rec_fill_focus" />
+            <stroke
+                android:width="@dimen/rule_strong"
+                android:color="@color/ink" />
+            <corners android:radius="@dimen/radius_control" />
+        </shape>
+    </item>
+
+    <item>
+        <ripple android:color="@color/ripple_on_paper">
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/rec_fill" />
+                    <corners android:radius="@dimen/radius_control" />
+                </shape>
+            </item>
+        </ripple>
+    </item>
+</selector>

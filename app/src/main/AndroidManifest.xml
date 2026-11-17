@@ -12,6 +12,16 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
+    <!--
+      成片写公共相册：
+        API 29+ 走 MediaStore，无需权限；
+        API 26-28 没有 RELATIVE_PATH，只能写公共目录后扫进相册，需要这个权限。
+      用 maxSdkVersion 卡住，29+ 不会申请、也不会在应用信息里显示「存储权限」。
+    -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"

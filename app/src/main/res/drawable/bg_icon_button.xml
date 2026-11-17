@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  顶栏图标按钮（设置、返回）：无底，只有水波和焦点圈。
+  焦点圈做成一圈 2dp 琥珀外描边，不改变布局尺寸。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="oval">
+            <solid android:color="@android:color/transparent" />
+            <stroke
+                android:width="@dimen/rule_strong"
+                android:color="@color/accent" />
+        </shape>
+    </item>
+
+    <item>
+        <ripple android:color="@color/ripple_on_paper">
+            <item android:drawable="@android:color/transparent" />
+        </ripple>
+    </item>
+</selector>

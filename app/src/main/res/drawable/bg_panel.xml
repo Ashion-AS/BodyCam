@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 面板：状态读数与水印之外的所有浮层文字都坐在这上面，保证压在白墙/夜路上都可读 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/scrim_panel" />
+    <stroke
+        android:width="@dimen/rule_hair"
+        android:color="@color/rule" />
+    <corners android:radius="@dimen/radius_panel" />
+</shape>

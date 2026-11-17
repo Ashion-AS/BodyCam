@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  文字角色。Console 主题只有两副嗓子：
+    sans-serif-medium（Host Grotesk 的位置）——人在读的词：状态、按钮、设置项
+    monospace（Atkinson Hyperlegible Mono 的位置）——仪器写出来的东西：
+      分辨率、帧率、计时、S/D/R 校准值。等宽字体本身数字就是等宽的，不用再开 tnum。
+
+  标签一律小一号、句首大小写、不加字距（不要全大写拉伸）。
+
+  命名用扁平前缀 BodyCam*，不用点号：点号在 Android 里是隐式继承链，
+  会去找并不存在的父样式。
+-->
+<resources>
+
+    <!-- 仪器读数：分辨率 / 帧率 / 校准行 -->
+    <style name="BodyCamInstrument">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textSize">@dimen/text_sm</item>
+        <item name="android:textColor">@color/muted</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <!-- 仪器读数中的主数值：录像计时，全场唯一的红字 -->
+    <style name="BodyCamInstrumentLarge">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textSize">@dimen/text_xl</item>
+        <item name="android:textColor">@color/rec_signal</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <!-- 标签：按钮文字、设置项标题 -->
+    <style name="BodyCamLabel">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">@dimen/text_md</item>
+        <item name="android:textColor">@color/ink</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <!-- 标题：页面级标题 -->
+    <style name="BodyCamTitle">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textSize">@dimen/text_lg</item>
+        <item name="android:textColor">@color/ink</item>
+    </style>
+
+    <!-- 说明文字：比标签再低一层，用 muted 而不是降透明度 -->
+    <style name="BodyCamHint">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textSize">@dimen/text_sm</item>
+        <item name="android:textColor">@color/muted</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <!--
+      盖在实时画面上的文字（顶栏读数、计时、按键提示、校准面板）。
+
+      这些字坐的底是 50% 不透明的 scrim，白色画面上压出来只到中灰：
+      实测 ink 3.1:1、muted 1.4:1、accent 2.0:1，都不到 AA。
+      两级补偿：
+        1. 文字色提到 ink_2 一档（muted 在白墙上抬不动，1.4 -> 3.4 仍不够）；
+        2. 加一道投影把文字紧邻的一圈压暗（视频上叠字的标准做法）。
+      两项合起来白墙场景实测：ink_2 5.2:1、accent 5.0:1，过 AA。
+
+      设置页与右下按钮不吃这套：那些地方是实底，不需要靠投影兜底。
+    -->
+    <style name="BodyCamInstrumentOverlay" parent="BodyCamInstrument">
+        <item name="android:textColor">@color/ink_2</item>
+        <item name="android:shadowColor">@color/text_shadow</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">1</item>
+        <item name="android:shadowRadius">4</item>
+    </style>
+
+    <style name="BodyCamInstrumentLargeOverlay" parent="BodyCamInstrumentLarge">
+        <!--
+          红色计时专用的一道投影：比普通叠字投影更重（0.93 不透明、半径 6dp），
+          因为红在 50% 顶栏压出的浅灰底上只有 1.1:1，必须把字紧邻一圈压到
+          near-black 才能立住——白墙场景实测 6.2:1。
+          用投影而不是描边：描边会给字形加一圈实心轮廓，视觉上等于加粗；
+          投影只压背景，字本身的笔画粗细不变。
+        -->
+        <item name="android:shadowColor">@color/text_glow</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">0</item>
+        <item name="android:shadowRadius">6</item>
+    </style>
+
+    <style name="BodyCamHintOverlay" parent="BodyCamHint">
+        <item name="android:textColor">@color/ink_2</item>
+        <item name="android:shadowColor">@color/text_shadow</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">1</item>
+        <item name="android:shadowRadius">4</item>
+    </style>
+
+</resources>

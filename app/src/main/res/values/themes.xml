@@ -1,9 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      BodyCam 主题。深色是唯一形态：这是取景器，画面以外的一切都必须退到画面背后。
+
+      colorAccent 同时驱动原生 Switch 的开启态和 RadioButton 的选中态，
+      所以它必须是 accent（琥珀），不能是别的强调色——否则页面里会出现第三种信号。
+    -->
     <style name="Theme.BodyCam" parent="@android:style/Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#000000</item>
-        <item name="android:statusBarColor">#000000</item>
-        <item name="android:navigationBarColor">#000000</item>
-        <item name="android:colorAccent">#E53935</item>
+        <item name="android:windowBackground">@color/paper</item>
+        <item name="android:statusBarColor">@color/paper</item>
+        <item name="android:navigationBarColor">@color/paper</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:colorControlActivated">@color/accent</item>
+        <item name="android:colorControlNormal">@color/ink_2</item>
+        <item name="android:colorControlHighlight">@color/ripple_on_paper</item>
+        <item name="android:textColorPrimary">@color/ink</item>
+        <item name="android:textColorSecondary">@color/muted</item>
+        <item name="android:textColorHint">@color/muted</item>
+        <!-- 深色地面：系统状态栏图标必须是浅色（导航栏属性 API 27 起，26 上由系统按深色主题处理） -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
+
 </resources>

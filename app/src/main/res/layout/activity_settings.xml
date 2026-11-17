@@ -1,39 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  设置页：一张「登记表」，不是卡片流。
+
+  结构：
+    顶栏  返回 + 标题，1dp 分隔线
+    行 1  预录开关（标题 + 一句说明 + 开关）
+    行 2  预录时长（分段选项，关闭预录时整行降到 40% 不透明度且不可点）
+    页脚  一行说明
+
+  行与行之间共用 1dp 分隔线，行本身是 paper_2；不叠卡片、不加投影。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#FF111318"
+    android:background="@color/paper"
     android:orientation="vertical">
 
-    <!-- 标题栏 -->
+    <!-- 顶栏 -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#66000000"
+        android:layout_height="@dimen/top_bar_height"
+        android:background="@drawable/bg_top_bar"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingHorizontal="8dp"
-        android:paddingVertical="12dp">
+        android:paddingHorizontal="@dimen/space_xs">
 
         <TextView
             android:id="@+id/btnBack"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:padding="8dp"
-            android:text="←"
-            android:textColor="#FFFFFF"
-            android:textSize="20sp" />
+            style="@style/BodyCamTitle"
+            android:layout_width="@dimen/touch_target"
+            android:layout_height="@dimen/touch_target"
+            android:background="@drawable/bg_icon_button"
+            android:clickable="true"
+            android:contentDescription="@string/action_back"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/glyph_back"
+            android:textColor="@color/ink" />
 
         <TextView
+            style="@style/BodyCamTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="8dp"
-            android:text="@string/title_settings"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp"
-            android:textStyle="bold" />
+            android:layout_marginStart="@dimen/space_xs"
+            android:text="@string/title_settings" />
     </LinearLayout>
 
     <ScrollView
@@ -44,17 +55,17 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingHorizontal="16dp"
-            android:paddingTop="12dp">
+            android:paddingBottom="@dimen/space_xl">
 
-            <!-- 预录开关 -->
+            <!-- 行 1：预录开关 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="#22000000"
+                android:background="@drawable/bg_row"
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
-                android:padding="16dp">
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -63,62 +74,60 @@
                     android:orientation="vertical">
 
                     <TextView
+                        style="@style/BodyCamLabel"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/settings_pre_record_title"
-                        android:textColor="#FFFFFF"
-                        android:textSize="16sp" />
+                        android:text="@string/settings_pre_record_title" />
 
                     <TextView
-                        android:layout_width="wrap_content"
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:text="@string/settings_pre_record_summary"
-                        android:textColor="#99FFFFFF"
-                        android:textSize="12sp" />
+                        android:layout_marginTop="@dimen/space_2xs"
+                        android:text="@string/settings_pre_record_summary" />
                 </LinearLayout>
 
                 <Switch
                     android:id="@+id/swPreRecord"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="12dp" />
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:minWidth="@dimen/touch_target"
+                    android:minHeight="@dimen/touch_target" />
             </LinearLayout>
 
-            <!-- 预录时长 -->
+            <!-- 行 2：预录时长 -->
             <LinearLayout
                 android:id="@+id/durationSection"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:background="#22000000"
+                android:background="@drawable/bg_row"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
 
                 <TextView
+                    style="@style/BodyCamLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/settings_pre_record_duration_title"
-                    android:textColor="#FFFFFF"
-                    android:textSize="16sp" />
+                    android:text="@string/settings_pre_record_duration_title" />
 
                 <RadioGroup
                     android:id="@+id/rgDuration"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
+                    android:layout_marginTop="@dimen/space_sm"
                     android:orientation="horizontal" />
             </LinearLayout>
 
-            <!-- 说明 -->
+            <!-- 页脚：代价说清楚，不藏 -->
             <TextView
-                android:paddingStart="16dp"
+                style="@style/BodyCamHint"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
+                android:layout_marginTop="@dimen/space_md"
+                android:paddingHorizontal="@dimen/space_md"
                 android:text="@string/settings_pre_record_hint"
-                android:textColor="#80FFFFFF"
-                android:textSize="12sp"
                 tools:ignore="RtlSymmetry" />
         </LinearLayout>
     </ScrollView>
