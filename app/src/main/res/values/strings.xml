@@ -13,6 +13,7 @@
     <string name="action_back">返回</string>
 
     <string name="need_permission">需要相机与录音权限才能工作</string>
+    <string name="need_storage_access">需要「所有文件访问」权限才能保存文件，请在系统设置中开启</string>
     <string name="no_camera">没有找到可用的摄像头</string>
     <string name="gl_failed">OpenGL 初始化失败</string>
     <string name="camera_not_ready">相机尚未就绪</string>

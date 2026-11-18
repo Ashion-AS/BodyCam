@@ -6,4 +6,10 @@
     <string name="settings_pre_record_duration_title">预录时长</string>
     <string name="settings_pre_record_duration_fmt">%1$d 秒</string>
     <string name="settings_pre_record_hint">预录同时缓存画面与声音；开启后耗电与内存占用会增加。</string>
+
+    <string name="settings_storage_title">文件存储权限</string>
+    <string name="settings_storage_granted">已开启，录像/照片/录音会保存到 BodyCam 目录</string>
+    <string name="settings_storage_missing">未开启，将无法保存文件。需在系统设置中允许「所有文件访问」</string>
+    <string name="settings_storage_open">去开启</string>
+    <string name="settings_storage_done">已开启</string>
 </resources>

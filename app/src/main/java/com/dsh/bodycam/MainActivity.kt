@@ -28,6 +28,7 @@ import com.dsh.bodycam.record.PreRecordBuffer
 import com.dsh.bodycam.record.SegmentRecorder
 import com.dsh.bodycam.service.KeepAliveService
 import com.dsh.bodycam.util.Storage
+import com.dsh.bodycam.util.StoragePermission
 import com.dsh.bodycam.util.rotationToDegrees
 import com.dsh.bodycam.watermark.PhotoWatermarker
 import com.dsh.bodycam.watermark.Telemetry
@@ -308,16 +309,31 @@ class MainActivity : Activity(), KeyRouter.Listener {
         ) {
             needed += Manifest.permission.POST_NOTIFICATIONS
         }
-        // API 26-28 写公共相册要这个；29+ 走 MediaStore 不需要，清单里也卡了 maxSdkVersion
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+        // API 26-29 直接写公共存储要这个运行时权限；30+ 改用「所有文件访问」，
+        // 清单里已用 maxSdkVersion=29 卡住，那条走 StoragePermission 引导
+        if (StoragePermission.needsRuntimePermission() &&
             !granted(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         ) {
             needed += Manifest.permission.WRITE_EXTERNAL_STORAGE
         }
         if (needed.isEmpty()) {
             setup()
+            ensureStorageAccess()
         } else {
             requestPermissions(needed.toTypedArray(), REQ_PERMISSIONS)
+        }
+    }
+
+    /**
+     * API 30+ 写公共存储需要「所有文件访问」权限，不能弹窗授予，只能引导去系统设置。
+     * 未开启时提示一次（不强行拦在用相机之前，用户可先看画面）；拍照/录像时会再兜底检查。
+     */
+    private fun ensureStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            !StoragePermission.isGranted(this)
+        ) {
+            toast(getString(R.string.need_storage_access))
+            StoragePermission.openSettings(this)
         }
     }
 
@@ -336,6 +352,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
         if (requestCode != REQ_PERMISSIONS) return
         if (hasCorePermission()) {
             setup()
+            ensureStorageAccess()
         } else {
             toast(getString(R.string.need_permission))
         }
@@ -528,6 +545,11 @@ class MainActivity : Activity(), KeyRouter.Listener {
 
     private fun capturePhoto() {
         val cam = camera ?: return toast(getString(R.string.camera_not_ready))
+        if (!StoragePermission.isGranted(this)) {
+            toast(getString(R.string.need_storage_access))
+            StoragePermission.openSettings(this)
+            return
+        }
         cam.takePhoto()
         flashScreen()
     }
@@ -568,6 +590,11 @@ class MainActivity : Activity(), KeyRouter.Listener {
     private fun startRecording() {
         if (recording) return
         if (savingSegment) return toast(getString(R.string.record_saving))
+        if (!StoragePermission.isGranted(this)) {
+            toast(getString(R.string.need_storage_access))
+            StoragePermission.openSettings(this)
+            return
+        }
         val p = pipeline ?: return toast(getString(R.string.camera_not_ready))
         val rec = recorder ?: return toast(getString(R.string.camera_not_ready))
         val cam = camera ?: return toast(getString(R.string.camera_not_ready))

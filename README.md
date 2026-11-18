@@ -116,25 +116,36 @@ app/build/outputs/apk/debug/app-debug.apk
 `local.properties` 里的 `sdk.dir` 换成你自己的 SDK 路径；换 NDK 版本时同步改
 `app/build.gradle.kts` 的 `ndkVersion`。
 
-文件输出目录（写进系统相册，相册和「文件」应用里都能直接看到；按类型再按天分文件夹，
+文件输出目录（与系统 DCIM 同级，统一放在 `BodyCam` 下，按类型再按天分文件夹，
 `yyyyMMdd` 为当天的年月日，目录不存在会自动创建）：
 
 ```
-DCIM/Video/yyyyMMdd/VID_yyyyMMdd_HHmmss_part00.mp4
-                    VID_yyyyMMdd_HHmmss_part01.mp4
-DCIM/Image/yyyyMMdd/IMG_yyyyMMdd_HHmmss_SSS.jpg
-DCIM/Audio/yyyyMMdd/AUD_yyyyMMdd_HHmmss_part00.m4a
-                    AUD_yyyyMMdd_HHmmss_part01.m4a
+/sdcard/BodyCam/Video/yyyyMMdd/VID_yyyyMMdd_HHmmss_part00.mp4
+                               VID_yyyyMMdd_HHmmss_part01.mp4
+/sdcard/BodyCam/Image/yyyyMMdd/IMG_yyyyMMdd_HHmmss_SSS.jpg
+/sdcard/BodyCam/Audio/yyyyMMdd/AUD_yyyyMMdd_HHmmss_part00.m4a
+                               AUD_yyyyMMdd_HHmmss_part01.m4a
 ```
 
-API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `RELATIVE_PATH`，
-改成直接写公共目录后再 `MediaScanner` 通知相册，这档会在首次启动时申请
-`WRITE_EXTERNAL_STORAGE`（清单里已用 `maxSdkVersion="28"` 卡住，29+ 不申请）。
+写完后用 `MediaScannerConnection.scanFile` 把文件索引进相册/音乐库，所以相册和「文件」
+应用里都能看到。
 
-> 音频特意放在 `DCIM/Audio` 而不是音乐库常见的 `Music/`：需求要求三类文件统一归到
-> DCIM 下。但 `MediaStore.Audio` 只接受 `Music/`、`Ringtones/` 等白名单目录（放 DCIM
-> 会抛异常），所以音频在 API 29+ 改用 `MediaStore.Files` 集合插入（允许任意公共目录），
-> 记录仍会被相册/音乐应用按 MIME 识别。
+**为什么不用 `MediaStore.insert` 而直接写文件**：Android 11+ 的 MediaProvider 只允许把
+媒体插入到固定白名单目录（Image→`DCIM`/`Pictures`，Video→`DCIM`/`Movies`，
+Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写进 `DCIM/Audio` 或把
+三类都放进自定义顶层 `BodyCam` 都会被拒绝（`Primary directory ... not allowed`）。
+直接文件写入 + 扫描入库即可绕开白名单，物理目录完全由我们自己掌控。
+
+**存储权限**（README 顶部点名的「所有文件访问」）：
+
+| Android 版本 | 需要的权限 |
+| --- | --- |
+| API 30+ | `MANAGE_EXTERNAL_STORAGE`（「所有文件访问」，系统设置里单独开关，不能弹窗授予） |
+| API 26-29 | `WRITE_EXTERNAL_STORAGE`（运行时权限；Android 10 靠 `requestLegacyExternalStorage` 恢复旧行为） |
+
+首次进入主界面或录音页、以及每次拍照/开始录像/开始录音之前都会校验；未授权时提示并跳到
+系统设置对应页面（`StoragePermission`），设置页也有「文件存储权限」一行可随时查看与开启。
+上架应用商店时需按平台要求申报「所有文件访问」用途。
 
 `yyyyMMdd_HHmmss` 是**按键开始录像的时间**（不是预录起点），所有分段共用同一前缀，
 `partNN` 递增。开了预录时，第一个分段的时长会比实际录像时长多出预录的那几秒。
@@ -316,7 +327,7 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
 到 `AUDIO_SEGMENT_SECONDS`（默认 30 分钟）时只关闭旧 muxer、开一个新 muxer 接着写。
 所以分段不打断录音，只在文件边界丢掉不足一帧的尾部（AAC 一帧约 23ms）。
 PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一段都能独立播放**。
-文件命名 `AUD_yyyyMMdd_HHmmss_partNN.m4a`，落在 `DCIM/Audio/yyyyMMdd`。
+文件命名 `AUD_yyyyMMdd_HHmmss_partNN.m4a`，落在 `BodyCam/Audio/yyyyMMdd`。
 
 **快捷开录（预留）**：`AudioRecordActivity.launch(context, startImmediately = true)`
 会给 Intent 带上 `AppConfig.ACTION_START_AUDIO_RECORD`，页面进入并拿到录音权限后

@@ -9,6 +9,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.dsh.bodycam.core.SettingsStore
+import com.dsh.bodycam.util.StoragePermission
 
 /**
  * 设置页：预录开关 + 预录时长（5/10/20/30s）。
@@ -19,6 +20,9 @@ class SettingsActivity : Activity() {
     private lateinit var swPreRecord: Switch
     private lateinit var durationSection: View
     private lateinit var rgDuration: RadioGroup
+    private lateinit var storageRow: View
+    private lateinit var storageStatus: TextView
+    private lateinit var storageAction: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,7 +31,14 @@ class SettingsActivity : Activity() {
         swPreRecord = findViewById(R.id.swPreRecord)
         durationSection = findViewById(R.id.durationSection)
         rgDuration = findViewById(R.id.rgDuration)
+        storageRow = findViewById(R.id.storageRow)
+        storageStatus = findViewById(R.id.storageStatus)
+        storageAction = findViewById(R.id.storageAction)
         findViewById<TextView>(R.id.btnBack).setOnClickListener { finish() }
+
+        storageRow.setOnClickListener {
+            if (!StoragePermission.isGranted(this)) StoragePermission.openSettings(this)
+        }
 
         swPreRecord.isChecked = SettingsStore.isPreRecordEnabled(this)
         swPreRecord.setOnCheckedChangeListener { _, checked ->
@@ -37,6 +48,24 @@ class SettingsActivity : Activity() {
 
         buildDurationOptions()
         updateSections()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从系统设置返回后刷新存储权限那一行
+        updateStorageRow()
+    }
+
+    /** 刷新存储权限行：已授权显示「已开启」，否则给出「去开启」并可点跳转 */
+    private fun updateStorageRow() {
+        val granted = StoragePermission.isGranted(this)
+        storageStatus.text = getString(
+            if (granted) R.string.settings_storage_granted else R.string.settings_storage_missing
+        )
+        storageAction.text = getString(
+            if (granted) R.string.settings_storage_done else R.string.settings_storage_open
+        )
+        storageRow.isClickable = !granted
     }
 
     /** 5/10/20/30s 四个单选按钮，横排 */

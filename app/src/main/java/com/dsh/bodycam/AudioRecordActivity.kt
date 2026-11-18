@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -18,6 +19,7 @@ import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.record.AudioRecorder
 import com.dsh.bodycam.ui.WaveformView
 import com.dsh.bodycam.util.Storage
+import com.dsh.bodycam.util.StoragePermission
 import java.util.Locale
 import java.util.concurrent.Executors
 
@@ -36,6 +38,7 @@ class AudioRecordActivity : Activity() {
 
     companion object {
         private const val REQ_AUDIO_PERMISSION = 2001
+        private const val REQ_STORAGE_PERMISSION = 2002
         private const val TICK_MS = 250L
 
         /**
@@ -104,11 +107,31 @@ class AudioRecordActivity : Activity() {
     // ------------------------------------------------------------ 权限
 
     private fun requestAudioPermissionIfNeeded() {
-        if (granted(Manifest.permission.RECORD_AUDIO)) {
-            maybeAutoStart()
+        if (!granted(Manifest.permission.RECORD_AUDIO)) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_AUDIO_PERMISSION)
             return
         }
-        requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQ_AUDIO_PERMISSION)
+        // 录音要写公共存储：API 26-29 补申请运行时权限，30+ 引导「所有文件访问」
+        if (StoragePermission.needsRuntimePermission() &&
+            !granted(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+        ) {
+            requestPermissions(
+                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_STORAGE_PERMISSION
+            )
+            return
+        }
+        ensureStorageAccess()
+        maybeAutoStart()
+    }
+
+    /** API 30+ 未开启「所有文件访问」时提示并跳系统设置 */
+    private fun ensureStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            !StoragePermission.isGranted(this)
+        ) {
+            toast(getString(R.string.need_storage_access))
+            StoragePermission.openSettings(this)
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -117,11 +140,19 @@ class AudioRecordActivity : Activity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQ_AUDIO_PERMISSION) return
-        if (granted(Manifest.permission.RECORD_AUDIO)) {
-            maybeAutoStart()
-        } else {
-            toast(getString(R.string.audio_need_permission))
+        when (requestCode) {
+            REQ_AUDIO_PERMISSION -> {
+                if (granted(Manifest.permission.RECORD_AUDIO)) requestAudioPermissionIfNeeded()
+                else toast(getString(R.string.audio_need_permission))
+            }
+            REQ_STORAGE_PERMISSION -> {
+                if (granted(Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+                    ensureStorageAccess()
+                    maybeAutoStart()
+                } else {
+                    toast(getString(R.string.need_storage_access))
+                }
+            }
         }
     }
 
@@ -160,6 +191,10 @@ class AudioRecordActivity : Activity() {
         if (recording || saving) return
         val rec = recorder ?: return
         if (!granted(Manifest.permission.RECORD_AUDIO)) {
+            requestAudioPermissionIfNeeded()
+            return
+        }
+        if (!StoragePermission.isGranted(this)) {
             requestAudioPermissionIfNeeded()
             return
         }

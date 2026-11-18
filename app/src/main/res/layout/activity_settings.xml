@@ -120,6 +120,50 @@
                     android:orientation="horizontal" />
             </LinearLayout>
 
+            <!-- 行 3：存储访问权限 -->
+            <LinearLayout
+                android:id="@+id/storageRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_storage_title" />
+
+                    <TextView
+                        android:id="@+id/storageStatus"
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_2xs" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/storageAction"
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:gravity="center"
+                    android:paddingHorizontal="@dimen/space_sm"
+                    android:textColor="@color/accent" />
+            </LinearLayout>
+
             <!-- 页脚：代价说清楚，不藏 -->
             <TextView
                 style="@style/BodyCamHint"
