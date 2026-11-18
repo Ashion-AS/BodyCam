@@ -116,19 +116,25 @@ app/build/outputs/apk/debug/app-debug.apk
 `local.properties` 里的 `sdk.dir` 换成你自己的 SDK 路径；换 NDK 版本时同步改
 `app/build.gradle.kts` 的 `ndkVersion`。
 
-文件输出目录（写进系统相册，相册和「文件」应用里都能直接看到）：
+文件输出目录（写进系统相册，相册和「文件」应用里都能直接看到；按类型再按天分文件夹，
+`yyyyMMdd` 为当天的年月日，目录不存在会自动创建）：
 
 ```
-DCIM/BodyCam/VID_yyyyMMdd_HHmmss_part00.mp4
-             VID_yyyyMMdd_HHmmss_part01.mp4
-             IMG_yyyyMMdd_HHmmss_SSS.jpg
-Music/BodyCam/AUD_yyyyMMdd_HHmmss_part00.m4a
-             AUD_yyyyMMdd_HHmmss_part01.m4a
+DCIM/Video/yyyyMMdd/VID_yyyyMMdd_HHmmss_part00.mp4
+                    VID_yyyyMMdd_HHmmss_part01.mp4
+DCIM/Image/yyyyMMdd/IMG_yyyyMMdd_HHmmss_SSS.jpg
+DCIM/Audio/yyyyMMdd/AUD_yyyyMMdd_HHmmss_part00.m4a
+                    AUD_yyyyMMdd_HHmmss_part01.m4a
 ```
 
 API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `RELATIVE_PATH`，
 改成直接写公共目录后再 `MediaScanner` 通知相册，这档会在首次启动时申请
 `WRITE_EXTERNAL_STORAGE`（清单里已用 `maxSdkVersion="28"` 卡住，29+ 不申请）。
+
+> 音频特意放在 `DCIM/Audio` 而不是音乐库常见的 `Music/`：需求要求三类文件统一归到
+> DCIM 下。但 `MediaStore.Audio` 只接受 `Music/`、`Ringtones/` 等白名单目录（放 DCIM
+> 会抛异常），所以音频在 API 29+ 改用 `MediaStore.Files` 集合插入（允许任意公共目录），
+> 记录仍会被相册/音乐应用按 MIME 识别。
 
 `yyyyMMdd_HHmmss` 是**按键开始录像的时间**（不是预录起点），所有分段共用同一前缀，
 `partNN` 递增。开了预录时，第一个分段的时长会比实际录像时长多出预录的那几秒。
@@ -310,7 +316,7 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
 到 `AUDIO_SEGMENT_SECONDS`（默认 30 分钟）时只关闭旧 muxer、开一个新 muxer 接着写。
 所以分段不打断录音，只在文件边界丢掉不足一帧的尾部（AAC 一帧约 23ms）。
 PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一段都能独立播放**。
-文件命名 `AUD_yyyyMMdd_HHmmss_partNN.m4a`，落在系统相册的 `Music/BodyCam`。
+文件命名 `AUD_yyyyMMdd_HHmmss_partNN.m4a`，落在 `DCIM/Audio/yyyyMMdd`。
 
 **快捷开录（预留）**：`AudioRecordActivity.launch(context, startImmediately = true)`
 会给 Intent 带上 `AppConfig.ACTION_START_AUDIO_RECORD`，页面进入并拿到录音权限后
