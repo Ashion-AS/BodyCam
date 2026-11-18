@@ -113,6 +113,18 @@
                     android:background="@drawable/dot_pre_record"
                     android:visibility="gone" />
 
+                <!-- 独立录音页入口 -->
+                <ImageView
+                    android:id="@+id/btnAudioRecord"
+                    android:layout_width="@dimen/touch_target"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="@dimen/space_xs"
+                    android:background="@drawable/bg_icon_button"
+                    android:contentDescription="@string/title_audio_record"
+                    android:focusable="true"
+                    android:padding="@dimen/space_sm"
+                    android:src="@drawable/ic_mic" />
+
                 <ImageView
                     android:id="@+id/btnSettings"
                     android:layout_width="@dimen/touch_target"

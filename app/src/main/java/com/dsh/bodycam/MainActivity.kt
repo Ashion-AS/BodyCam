@@ -69,6 +69,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
     private lateinit var debugView: TextView
     private lateinit var preRecordDot: View
     private lateinit var btnSettings: View
+    private lateinit var btnAudioRecord: View
 
     private var pipeline: GlPipeline? = null
     private var surfaceTexture: SurfaceTexture? = null
@@ -159,6 +160,9 @@ class MainActivity : Activity(), KeyRouter.Listener {
         btnRecord.setOnClickListener { toggleRecording() }
         btnSettings.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
+        }
+        btnAudioRecord.setOnClickListener {
+            AudioRecordActivity.launch(this)
         }
 
         // 设置变化（预录开关/时长）→ 刷新预录缓存与黄点
@@ -281,6 +285,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
         debugView = findViewById(R.id.debugView)
         preRecordDot = findViewById(R.id.preRecordDot)
         btnSettings = findViewById(R.id.btnSettings)
+        btnAudioRecord = findViewById(R.id.btnAudioRecord)
     }
 
     private fun handleIntent(intent: Intent?) {

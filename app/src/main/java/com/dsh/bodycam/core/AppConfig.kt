@@ -23,6 +23,12 @@ object AppConfig {
      */
     const val SEGMENT_SECONDS = 30 * 60
 
+    /**
+     * 录音分段长度（秒）。到点后编码器不中断，只换一个新的 muxer 继续写，
+     * 所以分段处不打断录音，只在文件边界切一刀（最多丢约一帧 AAC）。
+     */
+    const val AUDIO_SEGMENT_SECONDS = 30 * 60
+
     /** true = 常亮；执法记录仪一般设为 false，让屏幕可以自动熄灭继续录 */
     const val KEEP_SCREEN_ON = false
 
@@ -39,6 +45,12 @@ object AppConfig {
     const val NOTIFICATION_CHANNEL_ID = "bodycam_recording"
     const val NOTIFICATION_ID = 1001
     const val ACTION_STOP_RECORD = "com.dsh.bodycam.action.STOP_RECORD"
+
+    /**
+     * 拉起独立录音页并「进入即开录」的 action。
+     * 预留给按键快捷开始录音：拿到按键回调后用它 startActivity 即可跳到录音页开录。
+     */
+    const val ACTION_START_AUDIO_RECORD = "com.dsh.bodycam.action.START_AUDIO_RECORD"
 
     /**
      * 录音峰值低于此值视为「基本没录到声音」（16bit 满量程 32767）。

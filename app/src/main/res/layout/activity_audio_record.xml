@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  独立录音页：只用声音，不开相机。
+
+  纵向三段（自上而下）：
+    顶栏        返回 + 标题，56dp 信息带，1dp 分隔线
+    上半部      声音波形（占满中间剩余高度，居中）
+    下半部      录音时长 + 开始/停止二合一主控件
+
+  颜色 / 字号 / 间距全部引用 values 下的令牌，布局里不出现任何写死颜色。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paper"
+    android:orientation="vertical">
+
+    <!-- 顶栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/top_bar_height"
+        android:background="@drawable/bg_top_bar"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="@dimen/space_xs">
+
+        <TextView
+            android:id="@+id/btnBack"
+            style="@style/BodyCamTitle"
+            android:layout_width="@dimen/touch_target"
+            android:layout_height="@dimen/touch_target"
+            android:background="@drawable/bg_icon_button"
+            android:clickable="true"
+            android:contentDescription="@string/action_back"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/glyph_back"
+            android:textColor="@color/ink" />
+
+        <TextView
+            style="@style/BodyCamTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_xs"
+            android:text="@string/title_audio_record" />
+    </LinearLayout>
+
+    <!-- 上半部：波形 -->
+    <com.dsh.bodycam.ui.WaveformView
+        android:id="@+id/waveform"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/paper_3"
+        android:paddingHorizontal="@dimen/space_md"
+        android:paddingVertical="@dimen/space_lg" />
+
+    <!-- 音频页没有画面盖层，状态字号不需要叠加投影，走实底样式 -->
+    <TextView
+        android:id="@+id/statusView"
+        style="@style/BodyCamInstrument"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingTop="@dimen/space_md"
+        android:text="@string/audio_status_ready" />
+
+    <TextView
+        android:id="@+id/timerView"
+        style="@style/BodyCamInstrumentLarge"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:paddingTop="@dimen/space_xs"
+        android:text="@string/timer_zero" />
+
+    <!-- 下半部：二合一主控件，居中，离底留出拇指行程 -->
+    <TextView
+        android:id="@+id/btnToggle"
+        style="@style/BodyCamTitle"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/control_bar_height"
+        android:layout_marginHorizontal="@dimen/space_xl"
+        android:layout_marginTop="@dimen/space_lg"
+        android:layout_marginBottom="@dimen/space_xl"
+        android:background="@drawable/bg_btn_record"
+        android:clickable="true"
+        android:focusable="true"
+        android:gravity="center"
+        android:text="@string/btn_audio_start"
+        android:textColor="@color/ink" />
+
+</LinearLayout>

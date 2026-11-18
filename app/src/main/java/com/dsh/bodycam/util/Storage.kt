@@ -36,6 +36,7 @@ object Storage {
     private const val ALBUM = "BodyCam"
     private const val VIDEO_MIME = "video/mp4"
     private const val PHOTO_MIME = "image/jpeg"
+    private const val AUDIO_MIME = "audio/mp4"
 
     /** 一个正在写或已写完的输出条目 */
     class Entry(
@@ -122,6 +123,13 @@ object Storage {
     fun createVideo(context: Context, displayName: String): Entry? =
         create(context, displayName, VIDEO_MIME, Environment.DIRECTORY_DCIM)
 
+    /**
+     * 建一个待写音频条目，落在相册的 Music/BodyCam（录音归音乐库更合适）。
+     * 同样是先写、写完 [Entry.commit] 才对其它应用放行。
+     */
+    fun createAudio(context: Context, displayName: String): Entry? =
+        create(context, displayName, AUDIO_MIME, Environment.DIRECTORY_MUSIC)
+
     /** 直接存一张照片，落在相册的 DCIM/BodyCam；成功返回显示名 */
     fun savePhoto(context: Context, bytes: ByteArray, displayName: String): String? {
         val entry = create(context, displayName, PHOTO_MIME, Environment.DIRECTORY_DCIM)
@@ -143,8 +151,11 @@ object Storage {
     fun stamp(): String =
         SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
 
-    private fun mimeOf(displayName: String): String =
-        if (displayName.endsWith(".mp4", true)) VIDEO_MIME else PHOTO_MIME
+    private fun mimeOf(displayName: String): String = when {
+        displayName.endsWith(".mp4", true) -> VIDEO_MIME
+        displayName.endsWith(".m4a", true) -> AUDIO_MIME
+        else -> PHOTO_MIME
+    }
 
     private fun create(
         context: Context,
@@ -153,10 +164,10 @@ object Storage {
         publicDir: String
     ): Entry? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val collection = if (mime == VIDEO_MIME) {
-                MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            } else {
-                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val collection = when (mime) {
+                VIDEO_MIME -> MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                AUDIO_MIME -> MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                else -> MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             }
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)

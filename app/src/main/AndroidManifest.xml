@@ -48,6 +48,11 @@
             android:exported="false"
             android:label="@string/title_settings" />
 
+        <activity
+            android:name=".AudioRecordActivity"
+            android:exported="false"
+            android:label="@string/title_audio_record" />
+
         <!-- 息屏继续录像的关键：带 camera|microphone 类型的前台服务 + WakeLock -->
         <service
             android:name=".service.KeepAliveService"

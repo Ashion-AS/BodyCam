@@ -34,5 +34,6 @@
     <dimen name="top_bar_height">56dp</dimen>
     <dimen name="control_size">64dp</dimen>
     <dimen name="status_dot">8dp</dimen>
+    <dimen name="control_bar_height">72dp</dimen>
 
 </resources>

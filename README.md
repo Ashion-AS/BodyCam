@@ -9,6 +9,9 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 可选开启**预录**：按下录像键之前的画面与声音也会被保存下来，与后面的录像合成**同一个文件**
 （缓存 5 / 10 / 20 / 30 秒可调）。
 
+另外提供**独立录音页**：只采声音、不开相机，上半部是实时波形，下半部是一个
+「开始 / 停止」二合一按钮；录音同样按 30 分钟自动分段，编码器不停、只换封装文件。
+
 <p align="center">
   <img src="docs/preview.jpg" width="300" alt="预览界面">
   <img src="docs/photo_watermark.jpg" width="300" alt="照片水印">
@@ -31,6 +34,8 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
 | 预录开启提示 | 顶栏右侧**黄点**（`preRecordDot`），设置页可开关 |
+| 独立录音（波形 + 二合一按钮） | `AudioRecordActivity` + `AudioRecorder`，顶栏话筒图标进入（见「八点六」） |
+| 录音 30 分钟自动分段 | `AudioRecorder`：编码器不停，只换 MediaMuxer |
 
 ---
 
@@ -74,12 +79,15 @@ app/src/main/
 ├── java/com/dsh/bodycam/
 │   ├── MainActivity.kt      # 界面、按键、拍照/录像调度、预录交接、水印节拍
 │   ├── SettingsActivity.kt  # 设置页：预录开关 + 预录时长
+│   ├── AudioRecordActivity.kt  # 独立录音页：波形 + 开始/停止二合一按钮
 │   ├── camera/CameraController.kt   # Camera2：预览流 + JPEG 流 + 录像中拍照
 │   ├── record/SegmentRecorder.kt    # MediaCodec 编码 + MediaMuxer 无缝分段
+│   ├── record/AudioRecorder.kt      # 纯音频录音（AAC → .m4a），同样无缝分段
 │   ├── record/PreRecordBuffer.kt    # 预录：常驻编码器 + 环形帧队列 + 交接
-│   ├── record/CodecSupport.kt       # 两个 recorder 共用的编码器/音频采集样板
+│   ├── record/CodecSupport.kt       # 三个 recorder 共用的编码器/音频采集样板
 │   ├── gl/WatermarkEngine.kt        # JNI 声明（与 jni_bridge.cpp 一一对应）
 │   ├── gl/GlPipeline.kt             # handle 生命周期封装
+│   ├── ui/WaveformView.kt           # 录音页的滚动声音波形（自定义 View）
 │   ├── watermark/WatermarkPainter.kt    # Canvas 画时间/GPS/设备号（视频与照片共用）
 │   ├── watermark/PhotoWatermarker.kt    # 照片：EXIF 转正 + 叠水印 + 重编码
 │   ├── watermark/Telemetry.kt       # GPS
@@ -114,6 +122,8 @@ app/build/outputs/apk/debug/app-debug.apk
 DCIM/BodyCam/VID_yyyyMMdd_HHmmss_part00.mp4
              VID_yyyyMMdd_HHmmss_part01.mp4
              IMG_yyyyMMdd_HHmmss_SSS.jpg
+Music/BodyCam/AUD_yyyyMMdd_HHmmss_part00.m4a
+             AUD_yyyyMMdd_HHmmss_part01.m4a
 ```
 
 API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `RELATIVE_PATH`，
@@ -138,6 +148,8 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
 | 通知栏「停止录像」 | 停止并保存 |
 | 顶栏右侧齿轮 | 进入设置页（预录开关与时长） |
 | 顶栏右侧黄点 | 仅表示「预录缓冲在跑」，与当前是否在录像无关 |
+| 顶栏话筒图标 | 进入独立录音页 |
+| 录音页内音量- | 录音中停止录音（未录音时放行给系统调音量） |
 
 **关于息屏按键**：安卓在屏幕关闭时会把音量键交给系统去调音量，普通 Activity
 收不到。本工程给了两条路：
@@ -275,11 +287,47 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
 
 ---
 
+## 八点六、独立录音（只采声音，30 分钟一片）
+
+除了录像，还提供一条**只录音**的链路，用于只关心声音、不需要画面的场景
+（例如现场口述、问询笔录）。它和录像互不影响：录音页不开相机，录像也不会被它打断。
+
+**入口**：主界面顶栏右侧**话筒图标** → 打开独立录音页。
+页面自上而下分三段：
+
+- **顶栏**：返回 + 标题；
+- **上半部**：`WaveformView` 实时声音波形——中线上下一组柱状条随音量镜像伸缩，
+  停录后回到一条基线（颜色取琥珀 `accent`，基线取 `rule_2`，不引入新强调色）；
+- **下半部**：一个**开始 / 停止二合一按钮**。未录时红实心「开始录音」，录音中翻成
+  深底红描边红字「停止录音」（复用 `bg_btn_record` / `bg_btn_record_on`，与主界面
+  录像键同一套双态），上方显示状态文字与 `HH:MM:SS` 计时。
+
+**链路**（`AudioRecorder`）：`AudioRecord`（48k / 单声道 / PCM16）→ AAC 编码 →
+`MediaMuxer` → `.m4a`，采集与编码参数**直接复用** `CodecSupport`，与录像音轨完全一致。
+每读到一段 PCM 顺便算 RMS 电平，回调给波形（在音频线程回调，Activity 切回主线程绘制）。
+
+**分段**：与 `SegmentRecorder` 同一思路——编码器自始至终**只启动一次**、持续输出，
+到 `AUDIO_SEGMENT_SECONDS`（默认 30 分钟）时只关闭旧 muxer、开一个新 muxer 接着写。
+所以分段不打断录音，只在文件边界丢掉不足一帧的尾部（AAC 一帧约 23ms）。
+PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一段都能独立播放**。
+文件命名 `AUD_yyyyMMdd_HHmmss_partNN.m4a`，落在系统相册的 `Music/BodyCam`。
+
+**快捷开录（预留）**：`AudioRecordActivity.launch(context, startImmediately = true)`
+会给 Intent 带上 `AppConfig.ACTION_START_AUDIO_RECORD`，页面进入并拿到录音权限后
+**自动开始录音**。后续要接某个物理按键「一按就跳到录音页并开录」，在按键回调处
+调用这一行即可，页面逻辑无需再改。
+
+**代价**：纯音频分段不涉及 I 帧对齐，切换瞬间的丢失比录像更小；录音期间的耗电
+主要来自麦克风采集与 AAC 编码，远低于录像。
+
+---
+
 ## 九、常改参数（`core/AppConfig.kt`）
 
 | 参数 | 说明 |
 | --- | --- |
 | `SEGMENT_SECONDS` | 分段长度，默认 `30 * 60`；调成 8 秒即可快速验证切片 |
+| `AUDIO_SEGMENT_SECONDS` | 录音分段长度，默认 `30 * 60`；同样可调小验证 |
 | `VIDEO_FPS` / `VIDEO_BITRATE` | 帧率与码率（默认 30fps / 12Mbps） |
 | `AUDIO_SILENT_THRESHOLD` | 录音峰值低于此值提示「基本没录到声音」（默认 50 / 满量程 32767） |
 | `WATERMARK_WIDTH` | 水印宽度占画面比例（0.60） |
@@ -305,7 +353,7 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
    `FOREGROUND_SERVICE_CAMERA` / `FOREGROUND_SERVICE_MICROPHONE` 权限，
    并且要在用户可见时启动。
 4. **音频**：单声道 48kHz / 128kbps；需要双声道改 `record/CodecSupport.kt` 里的
-   `CHANNELS` 与 `AudioFormat.CHANNEL_IN_MONO`（两个 recorder 共用这一份）。
+   `CHANNELS` 与 `AudioFormat.CHANNEL_IN_MONO`（录像与录音共用的这一份）。
 5. **MP4 尾部索引**（已修复）：早先用传统 MP4，`moov` 要等 `stop()` 才写，
    进程被强杀当前这段会整体报废。现已改用 **fMP4（分片 MP4）**，moov/mvex
    前置、数据按 `moof+mdat` 分片自包含——强杀后已写入的部分仍可直接播放，
@@ -320,7 +368,11 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
    （按 12Mbps 估算），同时持续耗电。低配机或长时间桌面放置时建议用 5 秒档或关闭。
 8. **预录只在预览阶段生效**：预录内容都落在当次录像的**第一个分段**里；如果录像中途
    因分段换成第二个文件，预录部分不会出现在新分段中（语义上也不需要）。
-9. **未做**：断点续录、加密存储、Wi-Fi 回传、GNSS 北斗原始数据。
+9. **独立录音用传统 MP4 封装**：`.m4a` 走 `MediaMuxer` 的传统 MP4 格式（不是 fMP4），
+   所以进程被强杀时当前分段可能报废（已写完的旧分段不受影响）。录音一般由用户主动
+   停止，强杀概率低于录像；若需抗强杀，可把 `AudioRecorder.createMuxerLocked()` 里的
+   `MUXER_OUTPUT_MPEG_4` 换成 fMP4（`.m4a` + fMP4 兼容性需按播放器实测）。
+10. **未做**：断点续录、加密存储、Wi-Fi 回传、GNSS 北斗原始数据。
 
 ---
 
@@ -333,6 +385,9 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
   ```
 - 验证分段：把 `AppConfig.SEGMENT_SECONDS` 临时改成 8，录 30 秒，`adb pull` 后应该
   得到 3~4 个 `partNN.mp4`，每个都能单独播放。
+- 验证录音分段：把 `AppConfig.AUDIO_SEGMENT_SECONDS` 临时改成 8，在录音页录 20 秒，
+  `adb pull` 后应得到 2~3 个 `AUD_...partNN.m4a`，每个都能单独播放；录音页波形应随
+  说话明显起伏、静音时回落到基线。
 - 验证预录：开启预录（10 秒），在预览界面停留 15 秒以上再按音量- 开始录像，录 5 秒后
   停止。第一个分段的**总时长应约为 15 秒**（10 秒预录 + 5 秒），开头画面能正常播放，
   不应出现花屏或从中间开始解不出来。日志里可核对 `PreRecordBuffer` 的
@@ -373,7 +428,7 @@ API 29+ 走 `MediaStore`，**不需要任何存储权限**；API 26-28 没有 `R
 
 ## 十三、目录与代码规范
 
-- 全部 Kotlin，包名 `com.dsh.bodycam`，按职责分包：`camera` / `record` / `gl` / `watermark` / `service` / `key` / `core` / `util`
+- 全部 Kotlin，包名 `com.dsh.bodycam`，按职责分包：`camera` / `record` / `gl` / `watermark` / `service` / `key` / `core` / `util` / `ui`
 - 缩进 4 空格、UTF-8、LF；规则见 `.editorconfig`、`.gitattributes`
 - 不引入任何第三方依赖（无 AndroidX），减少体积与构建变量
 - **界面颜色、字号、间距一律走令牌**：`res/values/colors.xml`、`dimens.xml`、`styles.xml`。
