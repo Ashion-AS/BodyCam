@@ -603,8 +603,9 @@ class MainActivity : Activity(), KeyRouter.Listener {
         cam.setStreaming(true)
         // 按当前姿态确定画幅（竖屏 1080x1920），并在录制期间锁死，避免中途改尺寸
         applyOrientation()
-        // 先锁方向再启动编码器：让可能发生的界面重排走完，别和首帧抢渲染线程
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        // 全应用固定竖屏：录制期间无需再额外锁方向，这里只是确保保持竖屏
+        applyOrientation()
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 
         // 预录交接：预录开着且缓存正在跑，就把「编码器 + 最近 N 秒帧」一并
         // 交给录制器（成片 = 预录画面 + 实时画面，单个文件）；GL 不换 Surface。
@@ -661,8 +662,8 @@ class MainActivity : Activity(), KeyRouter.Listener {
         KeyRouter.recording = false
         KeyRouter.armed = resumed
 
-        // 解除方向锁定，恢复跟随设备
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+        // 全应用固定竖屏，停止录制后保持竖屏即可
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 
         // 顺序很重要：先停 GL 出帧，再销毁编码器 EGL 表面，最后让编码器排空并写尾帧
         pipeline?.setRecording(false)

@@ -490,7 +490,7 @@ void GlRenderer::renderFrame() {
 
     // 先画编码器：它可能阻塞（等编码器消费），不能让它拖住预览
     if (hasEncoder && encTs > 0) {
-        drawScene(videoW_, videoH_, false);
+        drawScene(videoW_, videoH_, false, true);
         eglPresentationTimeANDROID(display_, encoderSurface_, encTs);
         if (!eglSwapBuffers(display_, encoderSurface_)) {
             LOGW("encoder swap failed 0x%x", eglGetError());
@@ -499,7 +499,7 @@ void GlRenderer::renderFrame() {
 
     // 预录缓存编码器：同正式编码器一样画满整幅输出画幅
     if (hasPreRecord && encTs > 0) {
-        drawScene(videoW_, videoH_, false);
+        drawScene(videoW_, videoH_, false, true);
         eglPresentationTimeANDROID(display_, preRecordSurface_, encTs);
         if (!eglSwapBuffers(display_, preRecordSurface_)) {
             LOGW("pre-record swap failed 0x%x", eglGetError());
@@ -511,7 +511,7 @@ void GlRenderer::renderFrame() {
     // 必须显式切回来，否则 eglSwapBuffers 会报 EGL_BAD_SURFACE(0x300d) 黑屏。
     if (hasPreview) {
         if (first != previewSurface_ && !makeCurrent(previewSurface_)) return;
-        drawScene(previewW_, previewH_, true);
+        drawScene(previewW_, previewH_, true, false);
         if (!eglSwapBuffers(display_, previewSurface_)) {
             LOGW("preview swap failed 0x%x", eglGetError());
         }
@@ -527,7 +527,8 @@ void GlRenderer::renderFrame() {
     }
 }
 
-void GlRenderer::drawScene(int targetWidth, int targetHeight, bool fitInside) {
+void GlRenderer::drawScene(int targetWidth, int targetHeight, bool fitInside,
+                           bool withWatermark) {
     if (targetWidth <= 0 || targetHeight <= 0) return;
 
     int vpX = 0, vpY = 0, vpW = targetWidth, vpH = targetHeight;
@@ -571,7 +572,9 @@ void GlRenderer::drawScene(int targetWidth, int targetHeight, bool fitInside) {
     glDisableVertexAttribArray(camTexLoc_);
 
     // ---- 水印 ----
-    // 画面已经是「正向」的（旋转已经烘进像素），水印不需要再转
+    // 画面已经是「正向」的（旋转已经烘进像素），水印不需要再转。
+    // 预览画面不叠加水印，只有编码器/预录的输出画幅才烧进去。
+    if (!withWatermark) return;
     if (wmTex_ == 0 || wmTexW_ <= 0 || wmTexH_ <= 0) return;
 
     const float aspect = static_cast<float>(wmTexW_) / static_cast<float>(wmTexH_);

@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.PorterDuff
-import android.graphics.RectF
 import android.graphics.Typeface
 import com.dsh.bodycam.core.AppConfig
 
@@ -37,7 +36,6 @@ class WatermarkPainter {
     private class Slot(val width: Int) {
         val padX = width * 0.030f
         val padY = width * 0.024f
-        val barWidth = width * 0.010f
         val textGap = width * 0.016f
         val titleSize = width * 0.060f
         val subSize = width * 0.033f
@@ -48,17 +46,6 @@ class WatermarkPainter {
         val bitmap: Bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
-        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(120, 6, 10, 16)
-        }
-        val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.rgb(229, 57, 53)
-        }
-        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeWidth = (width * 0.003f).coerceAtLeast(1f)
-            color = Color.argb(70, 255, 255, 255)
-        }
         val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             textSize = titleSize
@@ -72,22 +59,10 @@ class WatermarkPainter {
             setShadowLayer(2f, 0f, 1f, Color.argb(150, 0, 0, 0))
         }
 
-        val rect = RectF(0f, 0f, width.toFloat(), height.toFloat())
-        val radius = width * 0.014f
-
         fun draw(data: WatermarkData) {
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
-            canvas.drawRoundRect(rect, radius, radius, bgPaint)
-            canvas.drawRoundRect(rect, radius, radius, borderPaint)
-            canvas.drawRect(
-                padX * 0.55f + barWidth * 0.5f,
-                padY * 0.75f,
-                padX * 0.55f + barWidth * 1.5f,
-                height - padY * 0.75f,
-                barPaint
-            )
 
-            val textX = padX * 0.55f + barWidth * 2.2f
+            val textX = padX * 0.55f
             var baseline = padY + titleSize * 0.86f
             canvas.drawText("${data.dateText}  ${data.timeText}", textX, baseline, titlePaint)
 

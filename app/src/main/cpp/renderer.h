@@ -88,7 +88,7 @@ private:
     void updateCameraTexture();
     void uploadWatermarkIfNeeded();
     void renderFrame();
-    void drawScene(int targetWidth, int targetHeight, bool fitInside);
+    void drawScene(int targetWidth, int targetHeight, bool fitInside, bool withWatermark);
 
     void post(std::function<void()> fn);
     bool postAndWait(const std::function<void()>& fn);

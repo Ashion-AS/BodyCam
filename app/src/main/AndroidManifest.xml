@@ -39,7 +39,7 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
             android:launchMode="singleTask"
-            android:screenOrientation="fullSensor"
+            android:screenOrientation="portrait"
             android:showWhenLocked="true"
             android:turnScreenOn="false">
             <intent-filter>
@@ -51,12 +51,14 @@
         <activity
             android:name=".SettingsActivity"
             android:exported="false"
-            android:label="@string/title_settings" />
+            android:label="@string/title_settings"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".AudioRecordActivity"
             android:exported="false"
-            android:label="@string/title_audio_record" />
+            android:label="@string/title_audio_record"
+            android:screenOrientation="portrait" />
 
         <!-- 息屏继续录像的关键：带 camera|microphone 类型的前台服务 + WakeLock -->
         <service
