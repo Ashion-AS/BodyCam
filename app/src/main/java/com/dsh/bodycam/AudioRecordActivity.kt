@@ -16,6 +16,8 @@ import android.view.WindowManager
 import android.widget.TextView
 import android.widget.Toast
 import com.dsh.bodycam.core.AppConfig
+import com.dsh.bodycam.core.SettingsStore
+import com.dsh.bodycam.core.TriggerRouter
 import com.dsh.bodycam.record.AudioRecorder
 import com.dsh.bodycam.ui.WaveformView
 import com.dsh.bodycam.util.Storage
@@ -29,12 +31,12 @@ import java.util.concurrent.Executors
  * 上半部是实时波形（[WaveformView]），下半部是一个开始/停止二合一的主控件。
  * 录音链路是 [AudioRecorder]（AudioRecord → AAC → .m4a），与录像里的音轨同参数。
  *
- * 快捷入口（预留）：外部用 [launch] 拉起本页并直接开录。
- * 目前还没有绑定具体物理按键；接入时只需在拿到按键回调的地方调用
- * `AudioRecordActivity.launch(context, startImmediately = true)`，
- * 页面进入后等录音权限就绪即自动开始。前台时也可用音量键切换录音/停止。
+ * 快捷入口：外部用 [launch] 拉起本页并直接开录，或配置「录音触发键 / 录音广播」
+ * 由 [TriggerRouter] 自动转入本页开录。页面在前台时认领「录音页监听」
+ * （[TriggerRouter.claimAudioListener]），此时按录音键即切换录音开始/停止；
+ * 离开页面时归还。主界面用另一个独立槽位，两者互不覆盖（录像中也能开录音页）。
  */
-class AudioRecordActivity : Activity() {
+class AudioRecordActivity : Activity(), TriggerRouter.Listener {
 
     companion object {
         private const val REQ_AUDIO_PERMISSION = 2001
@@ -88,6 +90,10 @@ class AudioRecordActivity : Activity() {
         findViewById<TextView>(R.id.btnBack).setOnClickListener { finish() }
         btnToggle.setOnClickListener { toggleRecording() }
 
+        // 录音页用独立的监听槽位：不会覆盖主界面的监听，
+        // 录像中打开录音页也不会让主界面丢掉「停止录像」的触发
+        TriggerRouter.claimAudioListener(this)
+
         if (AppConfig.KEEP_SCREEN_ON) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
@@ -101,8 +107,20 @@ class AudioRecordActivity : Activity() {
         recorder?.release() // 未保存的录音直接收尾成文件，不会丢
         recorder = null
         stopExecutor.shutdown()
+        TriggerRouter.releaseAudioListener(this)
         super.onDestroy()
     }
+
+    /** 外接「录音」触发：切换录音（在录音就停止，否则开始） */
+    override fun onAudioTrigger() {
+        // 走按钮同一条路径，避免绕过权限/存储检查
+        toggleRecording()
+    }
+
+    // 录音页没有拍照与录像功能，这两个触发忽略
+    override fun onShutterTrigger() = Unit
+
+    override fun onRecordTrigger() = Unit
 
     // ------------------------------------------------------------ 权限
 
@@ -169,12 +187,16 @@ class AudioRecordActivity : Activity() {
     // ------------------------------------------------------------ 按键
 
     /**
-     * 前台时音量下键在录音中可停止（只在录音中拦截，其余放行给系统调音量）。
-     * 「按键→跳转到本页并直接开录」的快捷入口见 [launch] 与 [AppConfig.ACTION_START_AUDIO_RECORD]。
+     * 录音页的按键：
+     *   - 录音中命中「录音触发键」或「录像触发键」→ 停止录音；
+     *   - 其余一律放行（未配置时一个键都不拦）。
+     *
+     * 触发键来自 `SettingsStore`（默认未绑定），具体匹配交给
+     * [TriggerRouter.matchKey]，保证主界面与录音页用的是同一套配置。
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        // 只在录音中吃音量下键（用来停止），未录音时放行，别抢系统调音量
-        if (recording && event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+        val target = TriggerRouter.matchKey(this, event.keyCode)
+        if (recording && (target == TriggerRouter.Target.AUDIO || target == TriggerRouter.Target.RECORD)) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) stopRecording()
             return true
         }

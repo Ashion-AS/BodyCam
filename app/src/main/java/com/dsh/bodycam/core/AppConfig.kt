@@ -42,6 +42,25 @@ object AppConfig {
      */
     const val ROTATION_OVERRIDE = -1
 
+    /**
+     * 外接触发：拍照 / 录像 / 录音的物理按键 keycode。
+     * 默认 `KEYCODE_UNKNOWN` = 不绑定，不会抢占任何按键（音量键照常调音量）。
+     * 接入外设时把它改成目标键的 keycode 即可，也可以在运行期调用
+     * `SettingsStore.setTriggerKeycodeXxx()` 覆盖（持久化，优先于这里的默认值）。
+     */
+    const val TRIGGER_KEYCODE_SHUTTER = android.view.KeyEvent.KEYCODE_UNKNOWN
+    const val TRIGGER_KEYCODE_RECORD = android.view.KeyEvent.KEYCODE_UNKNOWN
+    const val TRIGGER_KEYCODE_AUDIO = android.view.KeyEvent.KEYCODE_UNKNOWN
+
+    /**
+     * 外接触发：拍照 / 录像 / 录音的广播 action。
+     * 默认空串 = 不监听任何广播。接入 DVR / 车机时填上对方发的 action，
+     * 同样可由 `SettingsStore.setTriggerActionXxx()` 在运行期覆盖。
+     */
+    const val TRIGGER_ACTION_SHUTTER = ""
+    const val TRIGGER_ACTION_RECORD = ""
+    const val TRIGGER_ACTION_AUDIO = ""
+
     const val NOTIFICATION_CHANNEL_ID = "bodycam_recording"
     const val NOTIFICATION_ID = 1001
     const val ACTION_STOP_RECORD = "com.dsh.bodycam.action.STOP_RECORD"

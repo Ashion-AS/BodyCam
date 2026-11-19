@@ -2,7 +2,9 @@ package com.dsh.bodycam
 
 import android.Manifest
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
@@ -21,9 +23,10 @@ import android.widget.TextView
 import android.widget.Toast
 import com.dsh.bodycam.camera.CameraController
 import com.dsh.bodycam.core.AppConfig
-import com.dsh.bodycam.core.KeyRouter
 import com.dsh.bodycam.core.SettingsStore
+import com.dsh.bodycam.core.TriggerRouter
 import com.dsh.bodycam.gl.GlPipeline
+import com.dsh.bodycam.key.TriggerReceiver
 import com.dsh.bodycam.record.PreRecordBuffer
 import com.dsh.bodycam.record.SegmentRecorder
 import com.dsh.bodycam.service.KeepAliveService
@@ -41,13 +44,15 @@ import java.util.concurrent.Executors
 
 /**
  * 主界面：
- *   音量+ / 拍照按钮  → 拍一张 JPG（录像中也能拍）
- *   音量- / 录像按钮  → 开始 / 停止录像
+ *   拍照按钮 → 拍一张 JPG（录像中也能拍）
+ *   录像按钮 → 开始 / 停止录像
+ *   外接触发 → 可配置的物理按键 keycode 或广播 action（见 [TriggerRouter]），
+ *              默认一个都不绑定
  *
  * 相机、OpenGL、MediaRecorder 都挂在 Activity 上；息屏时靠
  * KeepAliveService（camera|microphone 前台服务 + WakeLock）保活。
  */
-class MainActivity : Activity(), KeyRouter.Listener {
+class MainActivity : Activity(), TriggerRouter.Listener {
 
     companion object {
         private const val REQ_PERMISSIONS = 1001
@@ -109,6 +114,10 @@ class MainActivity : Activity(), KeyRouter.Listener {
     /** 监听设置变化，销毁时解除，避免旧 Activity 被持有 */
     private var settingsListener: SettingsStore.Listener? = null
 
+    /** 外接按键广播接收器；action 是运行期配置，所以动态注册 */
+    private val triggerReceiver = TriggerReceiver()
+    private var receiverRegistered = false
+
     /** 停止录像要等编码器把尾帧写完，放到后台线程做，避免卡 UI */
     @Volatile
     private var savingSegment = false
@@ -151,8 +160,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
         setContentView(R.layout.activity_main)
         bindViews()
 
-        KeyRouter.listener = this
-        KeyRouter.armed = true
+        TriggerRouter.claimMainListener(this)
 
         telemetry = Telemetry(this).also { it.start() }
 
@@ -166,13 +174,17 @@ class MainActivity : Activity(), KeyRouter.Listener {
             AudioRecordActivity.launch(this)
         }
 
-        // 设置变化（预录开关/时长）→ 刷新预录缓存与黄点
+        // 设置变化（预录开关/时长、触发键/广播）→ 刷新缓存与黄点、重挂广播
         settingsListener = object : SettingsStore.Listener {
             override fun onSettingsChanged() {
-                runOnUiThread { applyPreRecordSetting() }
+                runOnUiThread {
+                    applyPreRecordSetting()
+                    refreshTriggerReceiver()
+                }
             }
         }
         SettingsStore.setListener(settingsListener)
+        refreshTriggerReceiver()
 
         // 方向校准：点调试行每次 +90°，可选 0/90/180/270，写入 SharedPreferences
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
@@ -207,7 +219,8 @@ class MainActivity : Activity(), KeyRouter.Listener {
     override fun onResume() {
         super.onResume()
         resumed = true
-        KeyRouter.armed = true
+        // 从设置页 / 录音页返回时重新认领主监听
+        TriggerRouter.claimMainListener(this)
 
         val p = pipeline
         if (p != null) {
@@ -240,8 +253,9 @@ class MainActivity : Activity(), KeyRouter.Listener {
     override fun onPause() {
         super.onPause()
         resumed = false
-        // 录像中必须保持「按键归应用」，否则息屏后无法用音量键停止
-        KeyRouter.armed = recording
+        // 录像中继续保持监听（armed 由「有监听 或 正在录像」计算得出），
+        // 息屏后仍可用触发键停止；未录像且退到后台时交回，避免占用触发
+        if (!recording) TriggerRouter.releaseMainListener(this)
         pipeline?.setPreviewVisible(false)
         if (!recording) camera?.setStreaming(false)
     }
@@ -250,10 +264,13 @@ class MainActivity : Activity(), KeyRouter.Listener {
         uiHandler.removeCallbacksAndMessages(null)
         settingsListener?.let { SettingsStore.clearListener(it) }
         settingsListener = null
+        if (receiverRegistered) {
+            runCatching { unregisterReceiver(triggerReceiver) }
+            receiverRegistered = false
+        }
         if (recording) stopRecording(wait = true)
-        KeyRouter.listener = null
-        KeyRouter.armed = false
-        KeyRouter.recording = false
+        TriggerRouter.releaseMainListener(this)
+        TriggerRouter.recording = false
 
         camera?.close()
         camera = null
@@ -515,31 +532,42 @@ class MainActivity : Activity(), KeyRouter.Listener {
     @Suppress("DEPRECATION")
     private fun currentRotation(): Int = windowManager.defaultDisplay.rotation
 
-    // ------------------------------------------------------------ 按键
+    // ------------------------------------------------------------ 按键 / 外接触发
 
+    /**
+     * 只拦截「配置好的触发键」，未配置时一律放行（音量键照常调音量）。
+     * 具体 keycode 与拦截条件由 [TriggerRouter] 判断。
+     */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (KeyRouter.armed) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_VOLUME_UP -> {
-                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                        KeyRouter.handleVolumeUp()
-                    }
-                    return true
-                }
-                KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                    if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-                        KeyRouter.handleVolumeDown()
-                    }
-                    return true
-                }
-            }
-        }
+        if (TriggerRouter.handleKeyEvent(this, event)) return true
         return super.dispatchKeyEvent(event)
     }
 
-    override fun onShutterKey() = capturePhoto()
+    override fun onShutterTrigger() = capturePhoto()
 
-    override fun onRecordKey() = toggleRecording()
+    override fun onRecordTrigger() = toggleRecording()
+
+    /** 外接「录音」触发：跳到独立录音页并直接开录 */
+    override fun onAudioTrigger() = AudioRecordActivity.launch(this, startImmediately = true)
+
+    /** 按 [SettingsStore] 里配置的 action 重新注册广播接收器；默认无 action 时不注册 */
+    private fun refreshTriggerReceiver() {
+        if (receiverRegistered) {
+            unregisterReceiver(triggerReceiver)
+            receiverRegistered = false
+        }
+        val actions = TriggerRouter.configuredActions(this)
+        if (actions.isEmpty()) return
+        val filter = IntentFilter().apply { actions.forEach(::addAction) }
+        // 触发广播来自外部设备（DVR / 车机），必须允许外部发送
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(triggerReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(triggerReceiver, filter)
+        }
+        receiverRegistered = true
+    }
 
     // ------------------------------------------------------------ 拍照
 
@@ -641,8 +669,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
         // 编码器已在 rec.start() 里启动，这里开始出帧即可
         p.setRecording(true)
         recording = true
-        KeyRouter.recording = true
-        KeyRouter.armed = true
+        TriggerRouter.recording = true
         recordStartElapsed = SystemClock.elapsedRealtime()
 
         val intent = Intent(this, KeepAliveService::class.java)
@@ -659,8 +686,7 @@ class MainActivity : Activity(), KeyRouter.Listener {
     private fun stopRecording(wait: Boolean = false) {
         if (!recording) return
         recording = false
-        KeyRouter.recording = false
-        KeyRouter.armed = resumed
+        TriggerRouter.recording = false
 
         // 全应用固定竖屏，停止录制后保持竖屏即可
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT

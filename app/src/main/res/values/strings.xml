@@ -5,7 +5,7 @@
     <string name="btn_capture">拍照</string>
     <string name="btn_record">录像</string>
     <string name="btn_stop">停止</string>
-    <string name="hint_keys">音量+ 拍照\n音量- 开始/停止录像</string>
+    <string name="hint_keys">点击下方按钮拍照 / 录像</string>
     <string name="status_booting">相机准备中…</string>
     <string name="timer_zero">00:00:00</string>
     <string name="readout_fmt">%1$d×%2$d %3$dfps</string>
@@ -35,8 +35,8 @@
     <string name="notification_text">点击返回应用，或使用下方按钮停止</string>
     <string name="action_stop">停止录像</string>
 
-    <string name="accessibility_label">音量键助手（息屏可用）</string>
-    <string name="accessibility_desc">开启后，即使屏幕关闭，也能用音量键拍照和开始/停止录像。</string>
+    <string name="accessibility_label">外接按键助手（息屏可用）</string>
+    <string name="accessibility_desc">开启后，即使屏幕关闭，也能用配置的触发键拍照和开始/停止录像。未配置触发键时不拦截任何按键。</string>
 
     <!-- 独立录音页 -->
     <string name="title_audio_record">录音</string>

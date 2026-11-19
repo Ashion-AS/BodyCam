@@ -17,7 +17,8 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
   <img src="docs/photo_watermark.jpg" width="300" alt="照片水印">
 </p>
 
-> 左：实时预览（水印左下角，音量键控制）；右：拍照输出，方向已转正、水印已烧进画面。
+> 左：实时预览（水印左下角，可用下方按钮或配置的外接触发操作）；
+> 右：拍照输出，方向已转正、水印已烧进画面。
 
 ---
 
@@ -25,8 +26,9 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 
 | 需求 | 实现 |
 | --- | --- |
-| 音量+ 拍照 | `MainActivity.dispatchKeyEvent` → `KeyRouter` → `capturePhoto()` |
-| 音量- 开始/停止录像 | 同上 → `toggleRecording()` |
+| 拍照 | 界面按钮 → `capturePhoto()` |
+| 开始/停止录像 | 界面按钮 → `toggleRecording()` |
+| 外接触发（预留，两种方式可同时用） | 物理按键 keycode 或广播 action → `TriggerRouter` → 拍照 / 录像 / 录音；**默认全空，不占用任何键** |
 | 息屏不中断录像 | `KeepAliveService`（`camera\|microphone` 前台服务 + `PARTIAL_WAKE_LOCK`） |
 | 录像中拍照 | Camera2 单次 `capture()`，同时带 JPEG 与预览两个 target，不打断录像流 |
 | 时间水印（OpenGL + C++，低功耗） | `cpp/renderer.cpp` 合成 OES 纹理 + 水印纹理，EGL 直出到编码器 |
@@ -97,9 +99,10 @@ app/src/main/
 │   ├── watermark/PhotoWatermarker.kt    # 照片：EXIF 转正 + 叠水印 + 重编码
 │   ├── watermark/Telemetry.kt       # GPS
 │   ├── service/KeepAliveService.kt  # 息屏保活
-│   ├── key/GlobalKeyService.kt      # 可选：息屏也能用音量键（无障碍）
-│   ├── core/KeyRouter.kt            # 按键去抖与分发
-│   ├── core/SettingsStore.kt        # 预录设置读写 + 变更回调
+│   ├── key/GlobalKeyService.kt      # 可选：息屏也能收到配置的触发键（无障碍）
+│   ├── key/TriggerReceiver.kt       # 外接广播 → TriggerRouter
+│   ├── core/TriggerRouter.kt        # 外接触发：keycode / 广播 action 匹配、去抖与分发
+│   ├── core/SettingsStore.kt        # 预录设置 + 触发键/广播配置读写 + 变更回调
 │   ├── core/AppConfig.kt            # 所有可调参数集中在这里
 │   ├── util/Rotation.kt             # Surface 旋转常量 → 角度
 │   └── util/Storage.kt              # 文件落盘
@@ -165,25 +168,61 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 
 ---
 
-## 五、按键与息屏
+## 五、触发方式（按键 / 广播）与息屏
+
+界面本身只有两个按钮（拍照、录像）；音量键不再内置任何映射。要接外设或车机按键，
+用下面两种**可配置**的触发方式，二者可同时生效：
 
 | 操作 | 效果 |
 | --- | --- |
-| 音量+ | 拍照（录像中也生效，闪光提示） |
-| 音量- | 开始 / 停止录像 |
+| 界面「拍照」按钮 | 拍照（录像中也生效，闪光提示） |
+| 界面「录像」按钮 | 开始 / 停止录像 |
+| 顶栏话筒图标 | 进入独立录音页 |
+| 配置的**拍照键 keycode** | 与拍照按钮相同 |
+| 配置的**录像键 keycode** | 与录像按钮相同（按下切换开始/停止） |
+| 配置的**录音键 keycode** | 主界面：跳到录音页并直接开录；录音页：切换录音开始/停止 |
+| 配置的**拍照广播 action** | 收到该广播即拍照 |
+| 配置的**录像广播 action** | 收到该广播即切换录像 |
+| 配置的**录音广播 action** | 同录音键：主界面直接开录，录音页内切换 |
 | 通知栏「停止录像」 | 停止并保存 |
 | 顶栏右侧齿轮 | 进入设置页（预录开关与时长） |
 | 顶栏右侧黄点 | 仅表示「预录缓冲在跑」，与当前是否在录像无关 |
-| 顶栏话筒图标 | 进入独立录音页 |
-| 录音页内音量- | 录音中停止录音（未录音时放行给系统调音量） |
+| 录音页内录音键 / 录像键 | 录音中停止录音（未配置时该页不拦截任何键） |
 
-**关于息屏按键**：安卓在屏幕关闭时会把音量键交给系统去调音量，普通 Activity
-收不到。本工程给了两条路：
+**默认全空**：`AppConfig.TRIGGER_KEYCODE_SHUTTER` / `TRIGGER_KEYCODE_RECORD` /
+`TRIGGER_KEYCODE_AUDIO` 都是 `KEYCODE_UNKNOWN`，`TRIGGER_ACTION_SHUTTER` /
+`TRIGGER_ACTION_RECORD` / `TRIGGER_ACTION_AUDIO` 都是空串，因此开箱即用时不拦截
+任何按键、不监听任何广播，音量键回归系统调音量。
 
-1. 默认：音量键只在应用前台时有效；录像可以息屏继续，回到前台再按音量- 停止。
-2. 可选：设置 → 无障碍 → 开启「音量键助手（息屏可用）」。开启后无障碍服务在系统
-   分发前截获音量键，**息屏状态也能拍照/停止录像**。只有本应用在前台或录像中才拦截
-   （`KeyRouter.armed`），其他时候音量键照常工作。
+**怎么配置**（目前没有设置 UI，按接入方式二选一）：
+
+1. **改常量**（固化进版本）：改 `core/AppConfig.kt` 里的六个 `TRIGGER_*` 常量即可。
+2. **运行期覆盖**（持久化，优先于常量）：调用
+   `SettingsStore.setTriggerKeycodeShutter / setTriggerKeycodeRecord /
+   setTriggerKeycodeAudio / setTriggerActionShutter / setTriggerActionRecord /
+   setTriggerActionAudio`，写入 `bodycam_settings` SharedPreferences，重启后仍生效；
+   传 `KEYCODE_UNKNOWN` / 空串即清除、回到默认。
+
+要点：
+
+- 同一个 keycode / action 同时配给多个动作时，按**拍照 → 录像 → 录音**取第一个。
+- 只在下按那一刻触发（`ACTION_DOWN` 且 `repeatCount == 0`），长按不会连发；
+  每个动作各自有 300 ms 去抖。
+- 只在 `TriggerRouter.armed`（本应用可见或正在录像）时消费，其余时候放行。
+- 广播接收器由 `MainActivity` 按配置动态注册；未配置 action 时不注册。
+  外部发送方直接 `sendBroadcast(Intent("<配置的 action>"))` 即可。
+- 监听器分两个独立槽位：主界面（全部三种触发）与录音页（只收录音触发），
+  互不覆盖。所以录像中也能打开录音页并正常使用，主界面的「停止录像」不会失效。
+- 录音触发优先给录音页（在前台时切换录音开始/停止）；没有录音页时给主界面，
+  主界面收到后跳到录音页并直接开录。
+
+**关于息屏按键**：安卓在屏幕关闭时会把按键交给系统，普通 Activity 收不到。
+本工程给了两条路：
+
+1. 默认：触发键只在应用前台时有效；录像可以息屏继续，回到前台再按触发键停止。
+2. 可选：设置 → 无障碍 → 开启「外接按键助手（息屏可用）」。开启后无障碍服务在系统
+   分发前截获按键，**息屏状态也能拍照/停止录像**。只有本应用在前台或录像中才拦截
+   （`TriggerRouter.armed`），其他时候按键照常工作。未配置触发键时一个键都不拦。
 
 > 注意：无障碍服务属于高权限，上架应用商店通常需要说明用途；内部设备可以直接开启。
 

@@ -66,7 +66,7 @@
             android:exported="false"
             android:foregroundServiceType="camera|microphone" />
 
-        <!-- 可选：在系统设置里开启后，息屏状态下音量键也能控制拍照/录像 -->
+        <!-- 可选：在系统设置里开启后，息屏状态下配置的触发键也能控制拍照/录像 -->
         <service
             android:name=".key.GlobalKeyService"
             android:exported="true"
