@@ -5,7 +5,8 @@ plugins {
 
 android {
     namespace = "com.dsh.bodycam"
-    compileSdk = 33
+    // media3-muxer 1.11.1 要求 compileSdk >= 36
+    compileSdk = 36
     // 与已安装的 NDK 保持一致；换机器改这里即可
     ndkVersion = "25.1.8937393"
 
@@ -63,6 +64,9 @@ android {
 }
 
 dependencies {
-    // 本工程刻意不依赖 AndroidX / 第三方库，减少体积与构建变量，
-    // 需要扩展时直接加 implementation 即可。
+    // fMP4 封装：MediaMuxer 的 MUXER_OUTPUT_FRAGMENTED_MPEG_4 是设备私有扩展
+    // （AOSP 根本没有该常量），强杀时 moov 尚未落盘，文件不可播放。
+    // media3 的 FragmentedMp4Muxer 真正做 ftyp+moov 前置、moof+mdat 分片，
+    // 进程被杀死后已写的分片仍可直接播放。
+    implementation("androidx.media3:media3-muxer:1.11.1")
 }

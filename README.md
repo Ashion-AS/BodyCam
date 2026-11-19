@@ -30,12 +30,13 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 息屏不中断录像 | `KeepAliveService`（`camera\|microphone` 前台服务 + `PARTIAL_WAKE_LOCK`） |
 | 录像中拍照 | Camera2 单次 `capture()`，同时带 JPEG 与预览两个 target，不打断录像流 |
 | 时间水印（OpenGL + C++，低功耗） | `cpp/renderer.cpp` 合成 OES 纹理 + 水印纹理，EGL 直出到编码器 |
-| 30 分钟自动分段 | `SegmentRecorder`：编码器不停，只换 MediaMuxer |
+| 30 分钟自动分段 | `SegmentRecorder`：编码器不停，只在分段点换一个新的 fMP4 封装器 |
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
 | 预录开启提示 | 顶栏右侧**黄点**（`preRecordDot`），设置页可开关 |
 | 独立录音（波形 + 二合一按钮） | `AudioRecordActivity` + `AudioRecorder`，顶栏话筒图标进入（见「八点六」） |
-| 录音 30 分钟自动分段 | `AudioRecorder`：编码器不停，只换 MediaMuxer |
+| 录音 30 分钟自动分段 | `AudioRecorder`：编码器不停，只在分段点换新的 fMP4 封装器 |
+| 强杀/掉电后文件仍可播放 | 录像与录音都写 **fMP4**（media3 `FragmentedMp4Muxer`），最多丢最后一个分片（2 秒） |
 
 ---
 
@@ -53,7 +54,8 @@ Camera2 ──SurfaceTexture──▶  OES 纹理 ──┐                     
                                         视频编码线程                     音频编码线程
                                      (H.264, 输出 ByteBuffer)        (AudioRecord → AAC)
                                               └───────────────┬───────────────┘
-                                                      MediaMuxer（每 30 分钟换一个）
+                                                   Fmp4Segment（每 30 分钟换一个）
+                                                  fMP4：moof+mdat 分片自包含
 ```
 
 要点：
@@ -61,7 +63,9 @@ Camera2 ──SurfaceTexture──▶  OES 纹理 ──┐                     
 - **零 CPU 拷贝**：相机帧全程停留在 GPU 纹理里，`glTexImage2D` 只用于上传那张小水印图。
 - **一次采样、两处输出**：同一帧画到预览和编码器两个 EGL Surface，不做二次解码/编码。
 - **预览与成片一致**：预览用等比缩放 + 黑边，看到的就是录进去的构图（含水印）。
-- **分段不中断编码**：只在分段点换 muxer，编码器与相机全程不停。
+- **分段不中断编码**：只在分段点换封装器，编码器与相机全程不停。
+- **写即成型**：`Fmp4Segment` 在首个样本前就写 `ftyp+moov`，数据按 `moof+mdat`
+  分片落盘，进程被强杀时已写分片仍可播放。
 - **预录与录像共用编码器**：空闲时帧流向预录 Surface，按下录像键时把渲染目标切到
   正式录像 Surface（就是该编码器自己的输入 Surface），编码器不重启、不丢帧（见「八点五」）。
 
@@ -81,8 +85,9 @@ app/src/main/
 │   ├── SettingsActivity.kt  # 设置页：预录开关 + 预录时长
 │   ├── AudioRecordActivity.kt  # 独立录音页：波形 + 开始/停止二合一按钮
 │   ├── camera/CameraController.kt   # Camera2：预览流 + JPEG 流 + 录像中拍照
-│   ├── record/SegmentRecorder.kt    # MediaCodec 编码 + MediaMuxer 无缝分段
-│   ├── record/AudioRecorder.kt      # 纯音频录音（AAC → .m4a），同样无缝分段
+│   ├── record/SegmentRecorder.kt    # MediaCodec 编码 + fMP4 无缝分段
+│   ├── record/AudioRecorder.kt      # 纯音频录音（AAC → .m4a），同样 fMP4 无缝分段
+│   ├── record/Fmp4Segment.kt        # 录像/录音共用的 fMP4 封装（media3 FragmentedMp4Muxer）
 │   ├── record/PreRecordBuffer.kt    # 预录：常驻编码器 + 环形帧队列 + 交接
 │   ├── record/CodecSupport.kt       # 三个 recorder 共用的编码器/音频采集样板
 │   ├── gl/WatermarkEngine.kt        # JNI 声明（与 jni_bridge.cpp 一一对应）
@@ -105,7 +110,10 @@ app/src/main/
 
 ## 四、构建
 
-环境：Android Studio（JDK 11+）、SDK 33、NDK `25.1.8937393`、CMake `3.18.1`。
+环境：Android Studio（JDK 17+）、**compileSdk 36**、`targetSdk 33` / `minSdk 26`、
+NDK `25.1.8937393`、CMake `3.18.1`；AGP 8.10.0、Gradle 8.11.1、Kotlin 2.0.21。
+唯一第三方依赖是 `androidx.media3:media3-muxer:1.11.1`（fMP4 封装），因此
+`gradle.properties` 需要 `android.useAndroidX=true`。
 
 ```bash
 ./gradlew assembleDebug
@@ -150,9 +158,10 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 `yyyyMMdd_HHmmss` 是**按键开始录像的时间**（不是预录起点），所有分段共用同一前缀，
 `partNN` 递增。开了预录时，第一个分段的时长会比实际录像时长多出预录的那几秒。
 
-分段采用 fMP4（fragmented MP4）而不是传统 MP4：moof/mdat 分片自包含，
-进程被强杀或掉电时，已写入的部分仍可直接播放；传统 MP4 的 moov 要等正常收尾才落盘，
-强杀就整段报废。代价是最后不到 1 秒可能丢。
+分段采用 fMP4（fragmented MP4，由 media3 `FragmentedMp4Muxer` 写入）而不是传统 MP4：
+`ftyp+moov` 在首个样本前落盘，数据按 `moof+mdat` 分片自包含，进程被强杀或掉电时，
+已写入的分片仍可直接播放；传统 MP4 的 moov 要等正常收尾才落盘，强杀就整段报废。
+代价是最后不足一个分片（2 秒）的数据可能丢。录像与录音**都是 fMP4**。
 
 ---
 
@@ -260,8 +269,8 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 
 - 视频/音频编码器**全程只启动一次**，持续输出；
 - 到 30 分钟时请求一个 I 帧（`PARAMETER_KEY_REQUEST_SYNC_FRAME`），
-  拿到该 I 帧后关闭旧 muxer、开新 muxer，把这一帧作为新文件的第一帧写入；
-- 两个线程共用一把锁保护 muxer，切换瞬间互斥；
+  拿到该 I 帧后关闭旧 `Fmp4Segment`、开新文件，把这一帧作为新文件的第一帧写入；
+- 两个线程共用一把锁保护当前分段，切换瞬间互斥；
 - 每个分段的第一帧都是 I 帧，所以**任意一段都能独立播放**；
 - 时间戳统一成「相对本次录制开始的微秒」，每段写入时减去该段的 base，
   所以每段都从 0 开始，音画不漂。
@@ -320,14 +329,16 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
   录像键同一套双态），上方显示状态文字与 `HH:MM:SS` 计时。
 
 **链路**（`AudioRecorder`）：`AudioRecord`（48k / 单声道 / PCM16）→ AAC 编码 →
-`MediaMuxer` → `.m4a`，采集与编码参数**直接复用** `CodecSupport`，与录像音轨完全一致。
-每读到一段 PCM 顺便算 RMS 电平，回调给波形（在音频线程回调，Activity 切回主线程绘制）。
+`Fmp4Segment`（`.m4a`，与录像同一套封装），采集与编码参数**直接复用** `CodecSupport`，
+与录像音轨完全一致。每读到一段 PCM 顺便算 RMS 电平，回调给波形（在音频线程回调，
+Activity 切回主线程绘制）。
 
 **分段**：与 `SegmentRecorder` 同一思路——编码器自始至终**只启动一次**、持续输出，
-到 `AUDIO_SEGMENT_SECONDS`（默认 30 分钟）时只关闭旧 muxer、开一个新 muxer 接着写。
+到 `AUDIO_SEGMENT_SECONDS`（默认 30 分钟）时只关闭旧分段、开一个新分段接着写。
 所以分段不打断录音，只在文件边界丢掉不足一帧的尾部（AAC 一帧约 23ms）。
 PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一段都能独立播放**。
 文件命名 `AUD_yyyyMMdd_HHmmss_partNN.m4a`，落在 `BodyCam/Audio/yyyyMMdd`。
+录音同样是 fMP4，进程被强杀时已写入的分片仍可播放。
 
 **快捷开录（预留）**：`AudioRecordActivity.launch(context, startImmediately = true)`
 会给 Intent 带上 `AppConfig.ACTION_START_AUDIO_RECORD`，页面进入并拿到录音权限后
@@ -373,8 +384,8 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
    `CHANNELS` 与 `AudioFormat.CHANNEL_IN_MONO`（录像与录音共用的这一份）。
 5. **MP4 尾部索引**（已修复）：早先用传统 MP4，`moov` 要等 `stop()` 才写，
    进程被强杀当前这段会整体报废。现已改用 **fMP4（分片 MP4）**，moov/mvex
-   前置、数据按 `moof+mdat` 分片自包含——强杀后已写入的部分仍可直接播放，
-   只有最后不到 1 秒可能丢。副作用：输出文件总时长/时长从不更新，极个别
+   前置、数据按 `moof+mdat` 分片自包含——强杀后已写入的分片仍可直接播放，
+   最多丢最后一个分片（2 秒）。副作用：输出文件总时长/时长从不更新，极个别
    播放器会显示 `--:--`（进度条仍在走），拖拽到末尾也不额外补帧。若需
    精确时长，可在文件关闭后用 `MediaMetadataRetriever` 重新写入或设
    `KEY_MEDIA_INFINITE`。
@@ -385,10 +396,9 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
    （按 12Mbps 估算），同时持续耗电。低配机或长时间桌面放置时建议用 5 秒档或关闭。
 8. **预录只在预览阶段生效**：预录内容都落在当次录像的**第一个分段**里；如果录像中途
    因分段换成第二个文件，预录部分不会出现在新分段中（语义上也不需要）。
-9. **独立录音用传统 MP4 封装**：`.m4a` 走 `MediaMuxer` 的传统 MP4 格式（不是 fMP4），
-   所以进程被强杀时当前分段可能报废（已写完的旧分段不受影响）。录音一般由用户主动
-   停止，强杀概率低于录像；若需抗强杀，可把 `AudioRecorder.createMuxerLocked()` 里的
-   `MUXER_OUTPUT_MPEG_4` 换成 fMP4（`.m4a` + fMP4 兼容性需按播放器实测）。
+9. **录音也曾用传统 MP4**（已修复）：早期 `.m4a` 走 `MediaMuxer` 的传统 MP4，
+   强杀时当前分段会报废。现在录音与录像共用 `Fmp4Segment`，同样是 fMP4，
+   已写分片仍可播放；文件扩展名仍是 `.m4a`，主流播放器与相册均正常识别。
 10. **未做**：断点续录、加密存储、Wi-Fi 回传、GNSS 北斗原始数据。
 
 ---
@@ -410,6 +420,9 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
   不应出现花屏或从中间开始解不出来。日志里可核对 `PreRecordBuffer` 的
   `slice: queue=N -> M frames, key=..., span=Xms` 与 `SegmentRecorder` 的
   `wrote N handover video frames`。
+- 验证强杀可播：开始录像（或录音）后执行
+  `adb shell am force-stop com.dsh.bodycam`，`adb pull` 出当前 `partNN` 文件，
+  应能直接播放且内容完整到最后一次分片（最多缺 2 秒）。
 - 想确认水印确实烧进视频：录 10 秒后 `adb pull` 到电脑，用播放器打开暂停看左下角；
   或用 `ffprobe` 核对分辨率、码率、每段的 `rotation`。
 - 改 JNI 方法签名时，`WatermarkEngine.kt` 与 `jni_bridge.cpp` 必须同步改，
@@ -436,6 +449,7 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
 | 预录交接 | 通过：预录 10 秒 + 录 5 秒，成片约 15 秒，单文件、开头可正常解码 |
 | 预录花屏 | 已修（待真机复验）：三处根因——(1) 编码器 PTS 回退到 `steady_clock` 与相机 `CLOCK_BOOTTIME` 混源；(2) 环形队列按时间窗裁剪会切在非 I 帧上；(3) muxer 就绪前的实时帧被直接丢弃。现改为 PTS 只在相机时间戳有效时出帧、按帧数裁剪并对齐关键帧、就绪前缓存至多 60 帧按序补写 |
 | 预录退出释放 | 通过：关闭预录或退出页面会销毁预录编码器与 `AudioRecord`，无明显常驻占用 |
+| 强杀可播（真机 MTK Android 13） | 通过：录像中 `adb shell am force-stop com.dsh.bodycam`，`D:\LOG\VID_..._part00.mp4` 可直接播放 |
 | lint | 0 error |
 
 > 模拟器的虚拟相机画面本身会缓慢变化，无法作为方向基准；方向的最终判定
@@ -447,7 +461,8 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
 
 - 全部 Kotlin，包名 `com.dsh.bodycam`，按职责分包：`camera` / `record` / `gl` / `watermark` / `service` / `key` / `core` / `util` / `ui`
 - 缩进 4 空格、UTF-8、LF；规则见 `.editorconfig`、`.gitattributes`
-- 不引入任何第三方依赖（无 AndroidX），减少体积与构建变量
+- 唯一第三方依赖是 `androidx.media3:media3-muxer`（只取 fMP4 封装，不引入
+  Player/UI 模块）；其余全部手写，减少体积与构建变量
 - **界面颜色、字号、间距一律走令牌**：`res/values/colors.xml`、`dimens.xml`、`styles.xml`。
   布局和 drawable 里不写十六进制色值，也不写 `13sp` 这种游离字号——真要加一档，
   先往令牌文件里加。

@@ -54,7 +54,7 @@ object Storage {
         private val context: Context,
         private val file: File
     ) {
-        /** 给 MediaMuxer 用的读写 FD；拿不到返回 null */
+        /** 给 muxer 用的读写 FD；拿不到返回 null */
         fun openReadWrite(): ParcelFileDescriptor? = try {
             ParcelFileDescriptor.open(
                 file,
