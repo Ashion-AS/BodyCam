@@ -13,7 +13,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 「开始 / 停止」二合一按钮；录音同样按 30 分钟自动分段，编码器不停、只换封装文件。
 
 <p align="center">
-  <img src="docs/preview.jpg" width="300" alt="预览界面">
+  <img src="docs/preview.png" width="300" alt="预览界面">
   <img src="docs/photo_watermark.jpg" width="300" alt="照片水印">
 </p>
 
@@ -36,6 +36,9 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
 | 预录开启提示 | 顶栏右侧**黄点**（`preRecordDot`），设置页可开关 |
+| 摄像头切换（前后摄 / 多后摄） | 顶栏切摄按钮循环切换，选择持久化；录像中禁止切换（见「六点六」） |
+| 补光 / 闪光灯 | 顶栏闪电按钮开常亮 torch（录像中也能切）；设置页选拍照补光策略（见「六点六」） |
+| 数字变焦 | 预览右侧竖向缩放条，拖动即改 `SCALER_CROP_REGION`；录像中也能调，拍照沿用同一视野（见「六点七」） |
 | 独立录音（波形 + 二合一按钮） | `AudioRecordActivity` + `AudioRecorder`，底部操作坞「录音」按钮进入（见「八点六」） |
 | 录音 30 分钟自动分段 | `AudioRecorder`：编码器不停，只在分段点换新的 fMP4 封装器 |
 | 文件管理（图片 / 视频 / 音频） | `FilesActivity`：三个 tab 分别列出 `BodyCam/{Image,Video,Audio}` 下的文件，最新在最上；点击进入 `ViewerActivity` 看图 / 播视频 / 播音频 |
@@ -47,19 +50,18 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 ## 二、数据流
 
 ```
-                     ┌──────────────── 渲染线程（C++） ────────────────┐
-Camera2 ──SurfaceTexture──▶  OES 纹理 ──┐                              │
-                                         ├──▶ GL 合成 ──┬──▶ 预览 SurfaceView
-水印 Bitmap ──RGBA 纹理 ─────────────────┘              │
-                                                        └──▶ MediaCodec 输入 Surface
-                                                              （预录/录像共用同一个编码器）
-                                                              │
-                                              ┌───────────────┴───────────────┐
-                                        视频编码线程                     音频编码线程
-                                     (H.264, 输出 ByteBuffer)        (AudioRecord → AAC)
-                                              └───────────────┬───────────────┘
-                                                   Fmp4Segment（每 30 分钟换一个）
-                                                  fMP4：moof+mdat 分片自包含
+Camera2 ──SurfaceTexture──▶ OES 纹理 ──┐
+                                       ├──▶ GL 合成 ──┬──▶ 预览 SurfaceView
+水印 Bitmap ──RGBA 纹理 ───────────────┘              │
+                                                      └──▶ MediaCodec 输入 Surface
+                                                            （预录与录像共用同一个编码器）
+                                                      │
+                                        ┌─────────────┴──────────────────────┐
+                                          视频编码线程        音频编码线程
+                                             (H.264)            (AAC)
+                                        └─────────────┬──────────────────────┘
+                                          Fmp4Segment（每 30 分钟换一个）
+                                          fMP4：moof+mdat 分片自包含
 ```
 
 要点：
@@ -86,11 +88,12 @@ app/src/main/
 │   └── jni_bridge.cpp       # JNI 入口：Surface→ANativeWindow、Bitmap→像素缓冲
 ├── java/com/dsh/bodycam/
 │   ├── MainActivity.kt      # 界面、按键、拍照/录像调度、预录交接、水印节拍
-│   ├── SettingsActivity.kt  # 设置页：预录开关 + 预录时长 + 调试校准行开关
+│   ├── SettingsActivity.kt  # 设置页：预录开关 + 预录时长 + 拍照补光 + 调试校准行开关
 │   ├── AudioRecordActivity.kt  # 独立录音页：波形 + 开始/停止二合一按钮
 │   ├── FilesActivity.kt     # 文件管理页：图片/视频/音频三个 tab，最新在最上
 │   ├── ViewerActivity.kt    # 媒体查看：图片缩放 / 视频播放 / 音频播放
 │   ├── camera/CameraController.kt   # Camera2：预览流 + JPEG 流 + 录像中拍照
+│   ├── light/LightController.kt     # 补光/红外灯统一入口：相机 torch 或 sysfs 固定节点
 │   ├── record/SegmentRecorder.kt    # MediaCodec 编码 + fMP4 无缝分段
 │   ├── record/AudioRecorder.kt      # 纯音频录音（AAC → .m4a），同样 fMP4 无缝分段
 │   ├── record/Fmp4Segment.kt        # 录像/录音共用的 fMP4 封装（media3 FragmentedMp4Muxer）
@@ -99,6 +102,7 @@ app/src/main/
 │   ├── gl/WatermarkEngine.kt        # JNI 声明（与 jni_bridge.cpp 一一对应）
 │   ├── gl/GlPipeline.kt             # handle 生命周期封装
 │   ├── ui/WaveformView.kt           # 录音页的滚动声音波形（自定义 View）
+│   ├── ui/ZoomSliderView.kt         # 主界面右侧竖向缩放条（数字变焦）
 │   ├── ui/ZoomableImageView.kt      # 看图：双指缩放 / 拖动 / 双击放大
 │   ├── watermark/WatermarkPainter.kt    # Canvas 画时间/GPS/设备号（视频与照片共用）
 │   ├── watermark/PhotoWatermarker.kt    # 照片：EXIF 转正 + 叠水印 + 重编码
@@ -195,8 +199,13 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 | 配置的**录像广播 action** | 收到该广播即切换录像 |
 | 配置的**录音广播 action** | 同录音键：主界面直接开录，录音页内切换 |
 | 通知栏「停止录像」 | 停止并保存 |
-| 顶栏右侧齿轮 | 进入设置页（预录开关与时长、调试校准行开关） |
+| 顶栏左侧第一行 | 分辨率 × 帧率读数 |
+| 顶栏左侧第二行 | 录像计时 `HH:MM:SS`，未录像时占位不显 |
+| 顶栏右侧齿轮 | 进入设置页（预录开关与时长、拍照补光、调试校准行开关） |
 | 顶栏右侧黄点 | 仅表示「预录缓冲在跑」，与当前是否在录像无关 |
+| 顶栏闪电按钮 | 补光灯常亮开关（相机 LED 或 sysfs 节点任一条可用就显示；开关状态为琥珀） |
+| 顶栏切摄按钮 | 循环切换摄像头（多摄机型才显示；录像中禁止切换） |
+| 预览右侧缩放条 | 竖向拖动 / 直接点按改变变焦倍率，上端为最大倍率、下端 1x（不支持数字变焦的摄像头隐藏） |
 | 录音页内录音键 / 录像键 | 录音中停止录音（未配置时该页不拦截任何键） |
 
 **默认全空**：`AppConfig.TRIGGER_KEYCODE_SHUTTER` / `TRIGGER_KEYCODE_RECORD` /
@@ -277,7 +286,8 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 画幅始终是竖屏**。转到画面正了就停：
 
 - 最多点 4 次回到原点，不会越点越乱；
-- 选择写进 `SharedPreferences`，重启不丢。
+- 选择写进 `SharedPreferences`，**按摄像头分别保存**（键名 `rotation_offset_<cameraId>`），
+  前后摄各校准一次、互不影响；旧版本存的全局 `rotation_offset` 作为后摄的兜底值。
 
 > 为什么不能自动：不同机型相机 `SurfaceTexture.getTransformMatrix()`
 > 返回的矩阵不一样（有的带镜像，有的还含一次 90° 旋转），部分机型
@@ -285,8 +295,149 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 > 硬编码任何一边都会踩到另一边，所以把最后的校准交给现场，一次点选即可。
 
 确认后想固化：把那个 `R` 值填到 `AppConfig.ROTATION_OVERRIDE`（`-1` 表示自动），
-或者改 `MainActivity.DEFAULT_ROTATION_OFFSET`（默认已按本机实测设为 `270`，
-也就是开箱即正向，不需要手动点；换机型再按需调整）。
+或者改 `MainActivity.defaultRotationOffset()`。
+
+未校准时的默认偏移按当前摄像头的传感器角度现算：`(360 - sensor) % 360`，
+使净旋转归零——后摄（多为 90）得 270、前摄（多为 270）得 90，**两者开箱都正向**。
+> 早期版本所有摄像头共用一个写死的 270，切到前摄会变成净旋转 180°（画面上下颠倒），
+> 已改为按传感器角度现算。
+
+---
+
+## 六点六、摄像头切换与补光
+
+两块能力共用顶栏右侧两个入口，都在相机就绪后按设备能力自动显隐。
+
+### 切换摄像头
+
+| 方面 | 行为 |
+| --- | --- |
+| 入口 | 顶栏「切换」图标；设备**只有一颗摄像头时隐藏** |
+| 顺序 | 后摄优先，多后摄按 id 升序；多颗时显示为「后摄 1 / 后摄 2」，前摄同理 |
+| 循环 | 在「所有后摄 → 所有前摄」的列表里循环，点一次换下一颗 |
+| 记忆 | 选择写入 `bodycam_settings` 的 `camera_id`，下次启动直接恢复 |
+| 录像中 | **禁止切换**，提示「请先停止录像再切换摄像头」（会话整体重建会打断编码） |
+| 切换过程 | 先 `CameraDevice.close()` 再开新设备——Camera2 同一时刻只允许一个活跃设备，先关后开才不会 `CAMERA_IN_USE` |
+| 复用 | `SurfaceTexture` 与 `GlPipeline` 不重建，只按新 spec 更新 `setDefaultBufferSize` 与旋转 |
+| 预录 | 切换前先停掉预录编码器，切完按新画幅重建（前后摄支持的分辨率集合可能不同） |
+
+方向校准值按摄像头分开持久化（见六点五），切过去会自动加载该摄像头自己的偏移。
+
+### 补光 / 闪光灯
+
+| 场景 | 实现 |
+| --- | --- |
+| 录像中常亮补光 | 顶栏闪电按钮，切换重复请求里的 `FLASH_MODE_TORCH`，**不重建会话**，编码与预览不中断 |
+| 按钮状态 | 开启时图标染成琥珀（`accent`），关闭为 `muted`；**设备上任意一颗摄像头有闪光灯就显示** |
+| 前摄下的补光 | 前摄通常没有 LED，按钮仍可用：改用 `CameraManager.setTorchMode()` 点亮**另一颗**带闪光灯的摄像头（多为后摄） |
+| 拍照补光 | 设置页「拍照补光」三选一：关闭 / 自动（暗处才闪）/ 强制（每次闪） |
+| 拍照策略 | 自动 → `CONTROL_AE_MODE_ON_AUTO_FLASH`，强制 → `CONTROL_AE_MODE_ON_ALWAYS_FLASH`，配合 `FLASH_MODE_SINGLE` |
+| 与常亮互斥 | 补光灯已常亮时拍照不再额外闪一下，保持 `FLASH_MODE_TORCH` |
+| 释放 | 当前摄像头自带的补光随重复请求/会话一起释放；外部点亮的另一颗在切摄像头、退出页面时显式关掉 |
+
+> 当前摄像头有 LED 时走重复请求——只改一个字段、最稳、录像中不打断编码。
+> 只有前摄等无 LED 的情况才退到 `CameraManager.setTorchMode()`：那颗摄像头
+> 没被本应用打开，不会 `CAMERA_IN_USE`。
+
+### 灯光控制层（LightController）
+
+补光与红外灯收敛到 `light/LightController.kt` 一个入口，把「灯挂在哪条总线上」与
+「业务什么时候开灯」解耦。**整机换硬件时不用改业务代码**，只填 `AppConfig` 的节点
+路径、必要时加一个按钮即可。
+
+#### 通路优先级
+
+| 通路 | 适用场景 | 实现 |
+| --- | --- | --- |
+| 相机闪光灯（torch） | 灯由摄像头模组自带 LED 提供 | 当前摄像头有 LED 走 `FLASH_MODE_TORCH`；否则 `CameraManager.setTorchMode()` 点另一颗 |
+| 固定 sysfs 节点 | 整机把灯接在 GPIO / LED 驱动上 | 写节点 `1` 开、`0` 关，见 `AppConfig.LIGHT_NODE_TORCH` / `LIGHT_NODE_IR` |
+| 未接入 | 节点留空且无可用闪光灯 | `available()` 返回 false，上层自动隐藏入口，不会出现「点了没反应」 |
+
+`TORCH` 类先试相机闪光灯、失败再退到节点；`IR` 类只走节点。
+
+#### 对接步骤
+
+**1. 填节点路径**（`core/AppConfig.kt`，留空 = 该灯未接入，代码自动跳过）
+
+```kotlin
+const val LIGHT_NODE_TORCH = ""   // 白光补光，例：/sys/class/leds/flashlight/brightness
+const val LIGHT_NODE_IR = ""      // 红外灯，  例：/sys/class/leds/ir_led/brightness
+```
+
+**2. 确认节点在真机上可写**（灯接 GPIO/LED 驱动时最容易踩的坑）
+
+```bash
+adb shell ls -l /sys/class/leds/                    # 找到灯的目录名
+adb shell cat /sys/class/leds/ir_led/brightness     # 看当前值格式（0/1 还是 0-255）
+adb shell 'echo 1 > /sys/class/leds/ir_led/brightness'   # 手工验灯
+```
+
+- 值域是 0/1 → 直接可用；是 0-255（PWM 调光）→ 需要把 `SysfsLight.set()` 里的
+  `"1"` 改成目标亮度值，例如 `"255"`
+
+**3. 权限**：写 sysfs 需要 root，或 vendor 在 init.rc / SELinux 策略里给本应用
+放行该节点写权限（`sepolicy` 里补 `allow untrusted_app sysfs_leds:file w_file_perms`）。
+未放行时写入失败**只记 `BodyCamLight` 日志**，不弹窗、不影响相机与录像。
+
+**4. 验证**：装包后看顶栏闪电按钮是否出现（`available()` 为 true 才显示），
+点击应能听到/看到灯亮，`adb logcat -s BodyCamLight` 可看到每次通断记录。
+
+#### 接红外灯 UI 入口
+
+红外灯通路已就绪，只差一个按钮。硬件确认后按下面三步接（语义与白光完全对称）：
+
+```kotlin
+// 1. 顶栏加按钮（activity_main.xml），显隐判断写：
+btnIr.visibility = if (LightController.available(LightController.Kind.IR)) View.VISIBLE else View.GONE
+
+// 2. 点击：
+btnIr.setOnClickListener {
+    if (!LightController.toggle(LightController.Kind.IR)) toast(getString(R.string.torch_unavailable))
+    btnIr.setColorFilter(getColor(
+        if (LightController.isOn(LightController.Kind.IR)) R.color.accent else R.color.muted))
+}
+
+// 3. 切摄像头 / 退出页面时的释放已经有了：MainActivity.releaseLights() → LightController.releaseAll()
+```
+
+#### API 速查
+
+| 成员 | 说明 |
+| --- | --- |
+| `LightController.init()` | 按 `AppConfig` 的节点路径建好两条 sysfs 通路；Activity `onCreate` 调用 |
+| `attachCameraTorch(torch)` / `detachCameraTorch()` | 注入 / 注销相机闪光灯通路（由 `MainActivity.TorchPath` 实现） |
+| `available(kind)` | 该种灯是否至少有一条通路；用来决定入口显隐 |
+| `isOn(kind)` | 当前开关状态；用来画按钮高亮（开=`accent`，关=`muted`） |
+| `set(kind, on)` / `toggle(kind)` | 开 / 关 / 切换；返回 false = 无可用通路或硬件拒绝 |
+| `releaseAll()` | 关掉所有灯并清状态；切摄像头、退出页面时调用 |
+
+`Kind.TORCH` 白光补光已接顶栏闪电按钮；`Kind.IR` 红外灯通路就绪、UI 待接。
+
+---
+
+## 六点七、数字变焦
+
+预览右侧有一条**竖向缩放条**，只改 `SCALER_CROP_REGION`，会话不重建——
+录像中拖动缩放条也不会打断编码，这与补光灯走重复请求是同一个思路。
+
+| 方面 | 行为 |
+| --- | --- |
+| 入口 | 预览右边缘竖向条（`ZoomSliderView`），`layout_gravity="end\|center_vertical"` |
+| 布局令牌 | 宽 `zoom_slider_width`(44dp)、高 `zoom_slider_height`(280dp)，颜色全取令牌：轨道 `rule_2`、填充与把手 `accent`、读数 `ink_2`/`muted` + 投影 |
+| 交互 | 「拖到哪就是哪」：按下即跳到对应倍率，上端最大、下端 1x；不做相对滑动，一步到位 |
+| 倍率上限 | `CameraSpec.zoomMax`：优先 `CONTROL_ZOOM_RATIO_RANGE`（API 30+），否则 `SCALER_AVAILABLE_MAX_DIGITAL_ZOOM`（通常 4~10） |
+| 显隐 | 该摄像头 `zoomMax <= 1` 时控件自行 `GONE`，界面上不会多出一条无效控件 |
+| 切换摄像头 | `applyCameraSpec()` 调 `setZoomRange()`：按新摄像头上限重置回 1x（前后摄变焦能力不同） |
+| 拍照 | `takePhoto()` 也写同一个裁剪区域，**照片与预览视野一致**，不会出现「预览放大了、拍出来是广角」 |
+| 录像 | 与预览共用同一条流，裁剪直接生效，编码器无需重建 |
+
+> 为什么不用 `CONTROL_ZOOM_RATIO`：那是 API 30 才有的字段，本项目 `minSdk 26`。
+> `SCALER_CROP_REGION` 从 API 21 起就有，全版本通吃；代价是需要自己按倍率
+> 算中心裁剪矩形（见 `CameraSpec.cropRegionFor()`）。
+
+裁剪以传感器有效区域（`SENSOR_INFO_ACTIVE_ARRAY_SIZE`）中心为锚点，
+所以放大时画面中心不动，四周等量内收——物理上等价于数字变焦。
+超出上限的倍率会被 `coerceIn` 夹住，不会给相机送非法区域。
 
 ---
 
@@ -514,9 +665,11 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 | `KEEP_SCREEN_ON` | true 则常亮；默认 false，允许息屏继续录 |
 | `DEBUG_OVERLAY` | 调试校准行（`S/D/R` 与流/输出尺寸）的**默认**显示状态；默认 false，实际以设置页开关为准 |
 | `ROTATION_OVERRIDE` | 强制旋转角，`-1` 为自动；真机方向差 90° 时填相反角度 |
+| `PHOTO_FLASH_OFF` / `AUTO` / `ALWAYS` | 拍照补光模式常量；运行期以设置页选择为准 |
+| `LIGHT_NODE_TORCH` / `LIGHT_NODE_IR` | 补光 / 红外灯的固定 sysfs 节点路径；留空表示该灯未接入（见「六点六」） |
 
 画幅不写死：`R` 为 90/270 时输出 1080×1920，否则 1920×1080；
-相机流尺寸由 `CameraController.probe()` 从设备支持的 `SurfaceTexture` 尺寸里挑
+相机流尺寸由 `CameraController.listCameras()` 从设备支持的 `SurfaceTexture` 尺寸里挑
 （优先 1920×1080）。
 
 ---
@@ -616,7 +769,7 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 - **界面颜色、字号、间距一律走令牌**：`res/values/colors.xml`、`dimens.xml`、`styles.xml`。
   布局和 drawable 里不写十六进制色值，也不写 `13sp` 这种游离字号——真要加一档，
   先往令牌文件里加。
-- 配色语义固定，不要混用：**红 = 录像这件事本身**（录像主控件、计时数字、REC 圆点），
+- 配色语义固定，不要混用：**红 = 录像这件事本身**（录像主控件、计时数字），
   **黄 = 仪器**（预录缓冲在跑），**琥珀 = 通用交互**（选中、焦点、开关、单选）。
   其余都是中性层（`paper` / `ink` / `rule`）。
 - 红拆了两档，不要合并：`rec_fill` 做实心按钮底（够暗才衬得住白字，4.87:1），
