@@ -84,6 +84,28 @@ object AppConfig {
     const val DEFAULT_BURST_INTERVAL_SECONDS = 1
     const val DEFAULT_BURST_COUNT = 3
 
+    // ------------------------------------------------------------ 循环录像 / 磁盘
+
+    /**
+     * 空间告警阈值的可选档位（MB），默认 [DEFAULT_DISK_WARN_MB]。
+     *
+     * 剩余空间低于该值时：循环录像开 → 删最早的分段腾空间；关 → 只提示。
+     */
+    val DISK_WARN_OPTIONS_MB = intArrayOf(300, 500, 1024, 2048)
+    const val DEFAULT_DISK_WARN_MB = 500
+
+    /**
+     * 强制停止阈值 = 告警阈值 / [DISK_STOP_DIVISOR]，且不低于 [DISK_STOP_MIN_MB]。
+     *
+     * 默认 500MB 告警 → 100MB 强制停，与需求里的「500MB 告警、100MB 强制停」一致；
+     * 调大告警档位时停止线同步抬高，仍留出足够余量把当前分段正常收尾。
+     */
+    const val DISK_STOP_DIVISOR = 5
+    const val DISK_STOP_MIN_MB = 100
+
+    /** 磁盘巡检间隔（毫秒）：录制中按这个节奏查剩余空间，2 秒一次开销可忽略 */
+    const val DISK_CHECK_MS = 2000L
+
     /**
      * 固定节点的灯光通路（sysfs）。
      *

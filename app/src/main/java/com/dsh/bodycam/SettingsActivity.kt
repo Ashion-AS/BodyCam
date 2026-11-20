@@ -14,13 +14,15 @@ import com.dsh.bodycam.core.SettingsStore
 import com.dsh.bodycam.util.StoragePermission
 
 /**
- * 设置页：预录开关 + 预录时长（5/10/20/30s）。
+ * 设置页：预录开关 + 预录时长（5/10/20/30s）、循环录像与空间告警阈值。
  * 改动即时写入 SharedPreferences，并回调通知主页面（如刷新黄点）。
  */
 class SettingsActivity : Activity() {
 
     private lateinit var swPreRecord: Switch
+    private lateinit var swLoopRecord: Switch
     private lateinit var swDebugOverlay: Switch
+    private lateinit var rgDiskWarn: RadioGroup
     private lateinit var rgPhotoFlash: RadioGroup
     private lateinit var rgPhotoMode: RadioGroup
     private lateinit var rgPhotoQuality: RadioGroup
@@ -40,7 +42,9 @@ class SettingsActivity : Activity() {
         setContentView(R.layout.activity_settings)
 
         swPreRecord = findViewById(R.id.swPreRecord)
+        swLoopRecord = findViewById(R.id.swLoopRecord)
         swDebugOverlay = findViewById(R.id.swDebugOverlay)
+        rgDiskWarn = findViewById(R.id.rgDiskWarn)
         rgPhotoFlash = findViewById(R.id.rgPhotoFlash)
         rgPhotoMode = findViewById(R.id.rgPhotoMode)
         rgPhotoQuality = findViewById(R.id.rgPhotoQuality)
@@ -71,12 +75,18 @@ class SettingsActivity : Activity() {
             SettingsStore.setDebugOverlayVisible(this, checked)
         }
 
+        swLoopRecord.isChecked = SettingsStore.isLoopRecordEnabled(this)
+        swLoopRecord.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setLoopRecordEnabled(this, checked)
+        }
+
         buildDurationOptions()
         buildPhotoFlashOptions()
         buildPhotoModeOptions()
         buildPhotoQualityOptions()
         buildPhotoSizeOptions()
         buildBurstOptions()
+        buildDiskWarnOptions()
         updateSections()
     }
 
@@ -277,6 +287,16 @@ class SettingsActivity : Activity() {
         }
         buildSegment(rgBurstCount, counts, SettingsStore.burstCount(this)) { count ->
             SettingsStore.setBurstCount(this, count)
+        }
+    }
+
+    /** 空间告警阈值：档位来自 [AppConfig.DISK_WARN_OPTIONS_MB] */
+    private fun buildDiskWarnOptions() {
+        val options = AppConfig.DISK_WARN_OPTIONS_MB.map {
+            it to getString(R.string.settings_disk_warn_fmt, it)
+        }
+        buildSegment(rgDiskWarn, options, SettingsStore.diskWarnMb(this)) { mb ->
+            SettingsStore.setDiskWarnMb(this, mb)
         }
     }
 

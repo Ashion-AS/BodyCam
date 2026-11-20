@@ -27,6 +27,12 @@
     <string name="audio_silent">注意：本次录像几乎没有声音（麦克风峰值 %1$d）</string>
     <string name="rotation_offset">校准 +%1$d°  R=%2$d  输出 %3$d×%4$d</string>
 
+    <!-- 磁盘空间 -->
+    <string name="disk_low_loop_off">存储空间不足（剩余 %1$d MB），请及时清理；接近耗尽时会自动停止录像</string>
+    <string name="disk_low_no_removable">存储空间不足（剩余 %1$d MB），已无可删除的旧录像</string>
+    <string name="disk_full_stop">存储空间即将耗尽（剩余 %1$d MB），已停止录像并保存当前文件</string>
+    <string name="disk_low_refuse_record">存储空间不足（剩余 %1$d MB），无法开始录像</string>
+
     <!-- 摄像头控制 -->
     <string name="action_torch">补光灯</string>
     <string name="action_switch_camera">切换摄像头</string>
@@ -39,6 +45,7 @@
     <string name="channel_desc">录像时保持相机与麦克风在后台运行</string>
     <string name="notification_title">正在录像</string>
     <string name="notification_text">点击返回应用，或使用下方按钮停止</string>
+    <string name="notification_low_disk">存储空间不足（剩余 %1$d MB），请尽快清理</string>
     <string name="action_stop">停止录像</string>
 
     <string name="accessibility_label">外接按键助手（息屏可用）</string>

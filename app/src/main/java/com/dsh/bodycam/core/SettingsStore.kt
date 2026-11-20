@@ -37,6 +37,8 @@ object SettingsStore {
     private const val KEY_PHOTO_SIZE_INDEX = "photo_size_index"
     private const val KEY_BURST_INTERVAL = "burst_interval_seconds"
     private const val KEY_BURST_COUNT = "burst_count"
+    private const val KEY_LOOP_RECORD = "loop_record"
+    private const val KEY_DISK_WARN_MB = "disk_warn_mb"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
@@ -160,6 +162,26 @@ object SettingsStore {
 
     fun setBurstCount(context: Context, count: Int) {
         prefs(context).edit().putInt(KEY_BURST_COUNT, count).apply()
+        listener?.onSettingsChanged()
+    }
+
+    // ------------------------------------------------------------ 循环录像
+
+    /** 循环录像：空间不足时自动删最老的分段；关闭时只告警并停录。默认关闭 */
+    fun isLoopRecordEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_LOOP_RECORD, false)
+
+    fun setLoopRecordEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_LOOP_RECORD, enabled).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 空间告警阈值（MB）；强制停录线由 [AppConfig] 按比例算出 */
+    fun diskWarnMb(context: Context): Int =
+        prefs(context).getInt(KEY_DISK_WARN_MB, AppConfig.DEFAULT_DISK_WARN_MB)
+
+    fun setDiskWarnMb(context: Context, mb: Int) {
+        prefs(context).edit().putInt(KEY_DISK_WARN_MB, mb).apply()
         listener?.onSettingsChanged()
     }
 

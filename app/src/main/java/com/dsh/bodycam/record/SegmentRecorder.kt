@@ -108,6 +108,16 @@ class SegmentRecorder(private val context: Context) {
     var lastMicPeak = 0
         private set
 
+    /**
+     * 当前正在写入的分段文件名（如 `VID_20261120_143022_part03.mp4`）；未录制时为空。
+     *
+     * 磁盘清理按「从旧到新」删文件，必须跳过这个——正在写的分段被删掉，
+     * 后面所有写入都会失败，且 muxer 还持有已删文件的 FD。
+     */
+    @Volatile
+    var currentSegmentName: String = ""
+        private set
+
     private var sessionMicPeak = 0
 
     /**
@@ -564,8 +574,12 @@ class SegmentRecorder(private val context: Context) {
     private fun createMuxerLocked() {
         val name = "VID_${nameBase}_part${String.format(Locale.US, "%02d", segmentIndex)}.mp4"
         val segment = Fmp4Segment.open(TAG, name) { Storage.createVideo(context, it) }
-            ?: return
+        if (segment == null) {
+            currentSegmentName = ""
+            return
+        }
         muxer = segment
+        currentSegmentName = name
         files.add(segment.entry)
     }
 
@@ -611,6 +625,7 @@ class SegmentRecorder(private val context: Context) {
     private fun closeMuxerLocked() {
         val segment = muxer ?: return
         muxer = null
+        currentSegmentName = ""
         // close() 会写出最后一个分片；没写过样本的空壳会自己 abort
         if (!segment.close()) files.remove(segment.entry)
     }

@@ -23,6 +23,11 @@ import com.dsh.bodycam.core.AppConfig
  */
 class KeepAliveService : Service() {
 
+    companion object {
+        /** 附带空间告警文案的 intent extra；服务收到后更新通知正文 */
+        const val EXTRA_LOW_DISK = "low_disk_text"
+    }
+
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -51,7 +56,20 @@ class KeepAliveService : Service() {
             }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 空间不足：把通知正文换成告警文案（不带额外 action，保持常驻）
+        intent?.getStringExtra(EXTRA_LOW_DISK)?.let { text ->
+            notifyLowDisk(text)
+        }
+        return START_STICKY
+    }
+
+    /** 更新前台通知正文为「空间不足」，标题与停止按钮保持不变 */
+    private fun notifyLowDisk(text: String) {
+        val notification = buildNotification(text)
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(AppConfig.NOTIFICATION_ID, notification)
+    }
 
     override fun onDestroy() {
         wakeLock?.let {
@@ -76,7 +94,7 @@ class KeepAliveService : Service() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(text: String = getString(R.string.notification_text)): Notification {
         val stopIntent = Intent(this, MainActivity::class.java).apply {
             action = AppConfig.ACTION_STOP_RECORD
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
@@ -102,7 +120,7 @@ class KeepAliveService : Service() {
         return builder
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.notification_title))
-            .setContentText(getString(R.string.notification_text))
+            .setContentText(text)
             .setOngoing(true)
             .setContentIntent(openPending)
             .addAction(

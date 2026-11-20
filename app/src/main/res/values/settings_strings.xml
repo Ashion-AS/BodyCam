@@ -12,6 +12,12 @@
     <string name="settings_storage_open">去开启</string>
     <string name="settings_storage_done">已开启</string>
 
+    <string name="settings_loop_record_title">循环录像</string>
+    <string name="settings_loop_record_summary">空间不足时自动删除最早的录像分段腾出空间；关闭则提示空间不足并停止录像。正在写入的分段始终保留</string>
+    <string name="settings_disk_warn_title">空间告警阈值</string>
+    <string name="settings_disk_warn_summary">剩余空间低于该值时告警；强制停录线约为它的五分之一（最低 100MB）</string>
+    <string name="settings_disk_warn_fmt">%1$d MB</string>
+
     <string name="settings_debug_overlay_title">调试校准行</string>
     <string name="settings_debug_overlay_summary">主页预览左上角显示 S/D/R 角度与流尺寸，点一下循环校准方向。仅现场排障用，正式使用建议关闭</string>
 

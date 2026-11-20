@@ -20,6 +20,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
+import android.util.Log
 import android.widget.TextView
 import android.widget.Toast
 import com.dsh.bodycam.camera.CameraController
@@ -33,6 +34,7 @@ import com.dsh.bodycam.light.LightController
 import com.dsh.bodycam.record.PreRecordBuffer
 import com.dsh.bodycam.record.SegmentRecorder
 import com.dsh.bodycam.service.KeepAliveService
+import com.dsh.bodycam.util.DiskGuard
 import com.dsh.bodycam.util.Storage
 import com.dsh.bodycam.util.StoragePermission
 import com.dsh.bodycam.util.rotationToDegrees
@@ -62,6 +64,11 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         private const val TICK_MS = 500L
         private const val PREFS = "bodycam"
         private const val KEY_ROTATION_OFFSET = "rotation_offset"
+
+        /** 空间告警 toast 的节流间隔：巡检 2 秒一次，但提示不要刷屏 */
+        private const val DISK_WARN_TOAST_MS = 30_000L
+
+        private const val MB = 1024L * 1024L
 
         /**
          * 未手动校准过的默认偏移：让净旋转归零（开箱即正向）。
@@ -160,6 +167,14 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private var recordStartElapsed = 0L
     private var resumed = false
 
+    /** 上次磁盘巡检时刻；告警提示做了节流，避免每 2 秒弹一次 */
+    private var lastDiskCheckElapsed = 0L
+    private var lastDiskWarnElapsed = 0L
+
+    /** 磁盘巡检在后台跑，同一时刻只允许一次 */
+    @Volatile
+    private var diskCheckRunning = false
+
     /** 监听设置变化，销毁时解除，避免旧 Activity 被持有 */
     private var settingsListener: SettingsStore.Listener? = null
 
@@ -174,6 +189,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private val uiHandler = Handler(Looper.getMainLooper())
     private val photoExecutor = Executors.newSingleThreadExecutor()
     private val stopExecutor = Executors.newSingleThreadExecutor()
+    private val diskExecutor = Executors.newSingleThreadExecutor()
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
@@ -183,6 +199,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             if (resumed) {
                 updateWatermark()
                 updateTimer()
+                checkDiskDuringRecording()
             }
             uiHandler.postDelayed(this, TICK_MS)
         }
@@ -360,6 +377,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         telemetry?.stop()
         telemetry = null
         photoExecutor.shutdown()
+        diskExecutor.shutdown()
         super.onDestroy()
     }
 
@@ -1023,6 +1041,14 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             StoragePermission.openSettings(this)
             return
         }
+        // 循环录像关闭时，空间不够就不开录——否则录到一半必然被迫中断
+        if (!SettingsStore.isLoopRecordEnabled(this)) {
+            val st = DiskGuard.inspect(this)
+            if (st.level != DiskGuard.Level.OK) {
+                toast(getString(R.string.disk_low_refuse_record, st.freeBytes / MB))
+                return
+            }
+        }
         val p = pipeline ?: return toast(getString(R.string.camera_not_ready))
         val rec = recorder ?: return toast(getString(R.string.camera_not_ready))
         val cam = camera ?: return toast(getString(R.string.camera_not_ready))
@@ -1141,6 +1167,75 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private fun startTicker() {
         uiHandler.removeCallbacks(ticker)
         uiHandler.post(ticker)
+    }
+
+    // ------------------------------------------------------------ 磁盘空间
+
+    /**
+     * 录像期间的磁盘巡检，节流到 [AppConfig.DISK_CHECK_MS] 一次。
+     *
+     * 行为：
+     *  - 低于**告警线**：循环录像开 → 由 [DiskGuard] 删最早的分段腾空间（正在写的
+     *    分段靠 `recorder.currentSegmentName` 跳过）；关 → 只提示一次。
+     *  - 低于**强制停录线**：无论循环录像是否开启，都安全停录。
+     *
+     * 停录走 [stopRecording]，它会把编码器尾帧排空、写出最后一个 moof+mdat，
+     * 所以文件仍是可播放的 fMP4，不会留下坏文件。
+     */
+    private fun checkDiskDuringRecording() {
+        if (!recording || savingSegment || diskCheckRunning) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastDiskCheckElapsed < AppConfig.DISK_CHECK_MS) return
+        lastDiskCheckElapsed = now
+
+        // 删除文件与多次 StatFs 都是 I/O，放后台线程，别卡住预览
+        diskCheckRunning = true
+        val loop = SettingsStore.isLoopRecordEnabled(this)
+        val rec = recorder
+        diskExecutor.execute {
+            val status = runCatching {
+                DiskGuard.check(this, loop) { rec?.currentSegmentName }
+            }.getOrNull()
+            diskCheckRunning = false
+            if (status == null || isDestroyed) return@execute
+            uiHandler.post { onDiskStatus(status, loop) }
+        }
+    }
+
+    private fun onDiskStatus(status: DiskGuard.Status, loop: Boolean) {
+        if (status.removedCount > 0) {
+            Log.i("BodyCamDisk", "循环录像清理 ${status.removedCount} 个分段，释放 ${status.freedBytes / MB}MB")
+        }
+        val now = SystemClock.elapsedRealtime()
+        when (status.level) {
+            DiskGuard.Level.OK -> Unit
+            DiskGuard.Level.WARN -> {
+                // 循环录像开着却没删出空间（已无可删），或关着 → 提示，节流到 30 秒
+                if (now - lastDiskWarnElapsed < DISK_WARN_TOAST_MS) return
+                lastDiskWarnElapsed = now
+                toast(
+                    getString(
+                        if (loop) R.string.disk_low_no_removable
+                        else R.string.disk_low_loop_off,
+                        status.freeBytes / MB
+                    )
+                )
+                notifyLowDisk(status.freeBytes / MB)
+            }
+            DiskGuard.Level.STOP -> {
+                toast(getString(R.string.disk_full_stop, status.freeBytes / MB))
+                notifyLowDisk(status.freeBytes / MB)
+                stopRecording()
+            }
+        }
+    }
+
+    /** 空间不足时把告警文案推给前台服务，更新常驻通知（息屏也能看到） */
+    private fun notifyLowDisk(freeMb: Long) {
+        val intent = Intent(this, KeepAliveService::class.java)
+            .putExtra(KeepAliveService.EXTRA_LOW_DISK, getString(R.string.notification_low_disk, freeMb))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+        else startService(intent)
     }
 
     // ------------------------------------------------------------ 水印 / UI
