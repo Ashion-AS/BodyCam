@@ -42,3 +42,8 @@ _*.mp4
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ---- 本地工具配置（含认证令牌，勿入库） ----
+.claude/
+.codechat/
+.spec/

@@ -69,13 +69,16 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private lateinit var statusView: TextView
     private lateinit var timerView: TextView
     private lateinit var recDot: View
-    private lateinit var btnShutter: TextView
-    private lateinit var btnRecord: TextView
+    private lateinit var btnShutter: View
+    private lateinit var btnRecord: View
+    private lateinit var iconRecord: android.widget.ImageView
+    private lateinit var labelRecord: TextView
     private lateinit var hintView: TextView
     private lateinit var debugView: TextView
     private lateinit var preRecordDot: View
     private lateinit var btnSettings: View
     private lateinit var btnAudioRecord: View
+    private lateinit var btnFiles: View
 
     private var pipeline: GlPipeline? = null
     private var surfaceTexture: SurfaceTexture? = null
@@ -172,6 +175,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         }
         btnAudioRecord.setOnClickListener {
             AudioRecordActivity.launch(this)
+        }
+        btnFiles.setOnClickListener {
+            FilesActivity.launch(this)
         }
 
         // 设置变化（预录开关/时长、触发键/广播）→ 刷新缓存与黄点、重挂广播
@@ -299,11 +305,14 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         recDot = findViewById(R.id.recDot)
         btnShutter = findViewById(R.id.btnShutter)
         btnRecord = findViewById(R.id.btnRecord)
+        iconRecord = findViewById(R.id.iconRecord)
+        labelRecord = findViewById(R.id.labelRecord)
         hintView = findViewById(R.id.hintView)
         debugView = findViewById(R.id.debugView)
         preRecordDot = findViewById(R.id.preRecordDot)
         btnSettings = findViewById(R.id.btnSettings)
         btnAudioRecord = findViewById(R.id.btnAudioRecord)
+        btnFiles = findViewById(R.id.btnFiles)
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -779,12 +788,13 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     }
 
     private fun updateUi() {
-        btnRecord.text = getString(if (recording) R.string.btn_stop else R.string.btn_record)
-        btnRecord.setBackgroundResource(
-            if (recording) R.drawable.bg_btn_record_on else R.drawable.bg_btn_record
+        labelRecord.text = getString(if (recording) R.string.btn_stop else R.string.btn_record)
+        iconRecord.setBackgroundResource(
+            if (recording) R.drawable.bg_dock_record_on else R.drawable.bg_dock_record
         )
         // 未录像：红实心 + 白字；录像中：反过来，深底 + 红字
-        btnRecord.setTextColor(getColor(if (recording) R.color.rec_signal else R.color.ink))
+        labelRecord.setTextColor(getColor(if (recording) R.color.rec_signal else R.color.ink))
+        iconRecord.setColorFilter(getColor(if (recording) R.color.rec_signal else R.color.ink))
         recDot.visibility = if (recording) View.VISIBLE else View.INVISIBLE
         timerView.visibility = if (recording) View.VISIBLE else View.GONE
         hintView.visibility = if (recording) View.GONE else View.VISIBLE

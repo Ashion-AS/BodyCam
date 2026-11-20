@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  录像进行中：主按钮反过来填 paper_3 深底 + 2dp 红描边，
+  与「未录像的红实心」一暗一亮，一眼可辨，仍是同一个红信号。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="oval">
+            <solid android:color="@color/paper_3" />
+            <stroke
+                android:width="@dimen/rule_strong"
+                android:color="@color/ink" />
+        </shape>
+    </item>
+
+    <item>
+        <ripple android:color="@color/ripple_on_paper">
+            <item>
+                <shape android:shape="oval">
+                    <solid android:color="@color/paper_3" />
+                    <stroke
+                        android:width="@dimen/rule_strong"
+                        android:color="@color/rec_signal" />
+                </shape>
+            </item>
+        </ripple>
+    </item>
+</selector>

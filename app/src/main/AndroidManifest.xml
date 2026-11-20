@@ -60,6 +60,18 @@
             android:label="@string/title_audio_record"
             android:screenOrientation="portrait" />
 
+        <activity
+            android:name=".FilesActivity"
+            android:exported="false"
+            android:label="@string/title_files"
+            android:screenOrientation="portrait" />
+
+        <activity
+            android:name=".ViewerActivity"
+            android:exported="false"
+            android:label="@string/title_files"
+            android:screenOrientation="portrait" />
+
         <!-- 息屏继续录像的关键：带 camera|microphone 类型的前台服务 + WakeLock -->
         <service
             android:name=".service.KeepAliveService"

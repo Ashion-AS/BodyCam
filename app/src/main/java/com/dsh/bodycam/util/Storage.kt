@@ -93,6 +93,28 @@ object Storage {
                 Log.w(TAG, "abort $displayName", e)
             }
         }
+
+        /**
+         * 回填 mvhd / tkhd / mdhd 的 duration 字段。
+         *
+         * media3 的 FragmentedMp4Muxer 写 moov 时这三处一律填 0（mvex 里也没有 mehd），
+         * 而 moov 是在首个样本之前就落盘的，那时还不可能知道总时长。结果就是文件里
+         * 没有任何声明总时长的字段：media3 的 FragmentedMp4Extractor 读 moov 时拿到
+         * durationUs = TIME_UNSET，SeekMap 退化成 Unseekable(TIME_UNSET)，ExoPlayer
+         * 认为这条流时长 0，READY 之后立刻 ENDED，一帧都不播。
+         *
+         * 单轨音频必然踩到；视频因为还有另一条轨（且播放器对 video 有额外处理）才
+         * 侥幸没暴露。电脑上的播放器（ffmpeg/VLC）会自行扫描分片算时长，所以能放。
+         *
+         * 只改 4 字节、位置和长度都不变，不破坏 tfhd 里存的绝对偏移。
+         */
+        fun patchDurations() {
+            try {
+                MuxerFix.patchDurations(file)
+            } catch (e: Exception) {
+                Log.w(TAG, "patchDurations $displayName", e)
+            }
+        }
     }
 
     /** 建一个待写视频条目，落在 BodyCam/Video/yyyyMMdd */
@@ -122,6 +144,47 @@ object Storage {
 
     fun stamp(): String =
         SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+
+    /** 媒体类型，对应 [Storage] 的三条落盘子目录 */
+    enum class Kind(val dirName: String, val extensions: List<String>) {
+        IMAGE("Image", listOf("jpg", "jpeg", "png")),
+        VIDEO("Video", listOf("mp4", "m4v")),
+        AUDIO("Audio", listOf("m4a", "mp4", "aac"))
+    }
+
+    /** 文件页用的只读条目 */
+    class MediaFile(val file: File) {
+        val name: String get() = file.name
+        val length: Long get() = file.length()
+        val modified: Long get() = file.lastModified()
+    }
+
+    /**
+     * 列出某类型下的所有文件，最新的在最上面。
+     *
+     * 先比文件修改时间，时间相同（粗粒度文件系统）再按文件名倒序；
+     * 文件名的 stamp 精度到毫秒，同秒连拍也不会乱序。
+     *
+     * @return 没有权限时返回空列表，由调用方提示
+     */
+    fun list(context: Context, kind: Kind): List<MediaFile> {
+        if (!StoragePermission.isGranted(context)) return emptyList()
+        @Suppress("DEPRECATION")
+        val root = File(Environment.getExternalStorageDirectory(), "$ROOT/${kind.dirName}")
+        val days = root.listFiles { f -> f.isDirectory } ?: return emptyList()
+        val out = ArrayList<MediaFile>()
+        for (day in days) {
+            val files = day.listFiles { f ->
+                f.isFile && kind.extensions.any { f.name.endsWith(".$it", true) }
+            } ?: continue
+            files.forEach { out += MediaFile(it) }
+        }
+        // 最新在最上：先按修改时间倒序，时间相同（粗粒度文件系统）再按名字倒序
+        out.sortWith(
+            compareByDescending<MediaFile> { it.modified }.thenByDescending { it.name }
+        )
+        return out
+    }
 
     /** 当天日期文件夹名，yyyyMMdd */
     private fun today(): String =

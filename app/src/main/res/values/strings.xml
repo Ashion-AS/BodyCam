@@ -5,7 +5,7 @@
     <string name="btn_capture">拍照</string>
     <string name="btn_record">录像</string>
     <string name="btn_stop">停止</string>
-    <string name="hint_keys">点击下方按钮拍照 / 录像</string>
+    <string name="hint_keys">点击下方按钮拍照 / 录像 / 录音</string>
     <string name="status_booting">相机准备中…</string>
     <string name="timer_zero">00:00:00</string>
     <string name="readout_fmt">%1$d×%2$d %3$dfps</string>
@@ -50,4 +50,15 @@
     <string name="audio_saved_segments">录音已保存 %1$d 个文件，最后一个：%2$s</string>
     <string name="audio_failed">录音保存失败（可能没有录到声音）</string>
     <string name="audio_silent_simple">注意：本次录音几乎没有声音</string>
+
+    <!-- 文件管理页 -->
+    <string name="title_files">文件</string>
+    <string name="tab_images">图片</string>
+    <string name="tab_videos">视频</string>
+    <string name="tab_audios">音频</string>
+    <string name="files_empty">还没有文件</string>
+    <string name="files_need_permission">需要「所有文件访问」权限才能读取文件</string>
+    <string name="viewer_image_failed">图片打不开</string>
+    <string name="viewer_play_failed">文件打不开</string>
+    <string name="file_meta_fmt">%1$s · %2$s</string>
 </resources>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  底部操作坞：一块圆角深底，四枚圆形按钮共用一个地面，
+  与顶栏同源（scrim_well），保证压在任何画面上都读得清。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/scrim_well" />
+    <stroke
+        android:width="@dimen/rule_hair"
+        android:color="@color/rule_2" />
+    <corners android:radius="@dimen/radius_panel" />
+</shape>

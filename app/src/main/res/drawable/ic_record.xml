@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 摄像机：24dp 描边图标，与 ic_capture / ic_mic 同一视觉重量 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@color/muted"
+        android:pathData="M17,10.5V7c0,-1.1 -0.9,-2 -2,-2H4C2.9,5 2,5.9 2,7v10c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2v-3.5l4,4v-11L17,10.5z" />
+</vector>

@@ -23,6 +23,17 @@ import kotlin.math.max
  */
 internal const val VIDEO_MIME = MediaFormat.MIMETYPE_VIDEO_AVC
 internal const val AUDIO_MIME = MediaFormat.MIMETYPE_AUDIO_AAC
+
+/**
+ * AAC-LC 的 RFC 6381 codec 字符串，与下面编码器用的
+ * `AACObjectLC`（audio object type 2）对应。
+ *
+ * media3 的 muxer 靠这个字符串判断「AAC 是否每个样本都是同步样本」：
+ * 不填 → 判定为非同步 → trun 里 190 个音频样本全被标 `sample_is_non_sync_sample`，
+ * 播放器因此丢弃整条音轨（有声画、无声音）。
+ */
+internal const val AAC_CODECS_LC = "mp4a.40.2"
+
 internal const val SAMPLE_RATE = 48_000
 internal const val CHANNELS = 1
 internal const val AUDIO_BITRATE = 128_000

@@ -1,30 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  次要控件：拍照。
-  键盘/开关控制聚焦时换 2dp 琥珀描边（与录像键同一个信号色，不引入第二种强调）；
-  其余状态是 1dp rule_2 描边 + 水波。
+  操作坞里的圆形次要按钮（拍照 / 录音 / 文件）。
+  1dp rule_2 圆环描边 + 水波；聚焦时换成 2dp 琥珀聚焦圈，与顶栏图标按钮同一信号。
 -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
 
     <item android:state_focused="true">
-        <shape android:shape="rectangle">
-            <solid android:color="@color/scrim_well" />
+        <shape android:shape="oval">
+            <solid android:color="@android:color/transparent" />
             <stroke
                 android:width="@dimen/rule_strong"
                 android:color="@color/accent" />
-            <corners android:radius="@dimen/radius_control" />
         </shape>
     </item>
 
     <item>
         <ripple android:color="@color/ripple_on_paper">
             <item>
-                <shape android:shape="rectangle">
-                    <solid android:color="@color/scrim_well" />
+                <shape android:shape="oval">
+                    <solid android:color="@android:color/transparent" />
                     <stroke
                         android:width="@dimen/rule_hair"
                         android:color="@color/rule_2" />
-                    <corners android:radius="@dimen/radius_control" />
                 </shape>
             </item>
         </ripple>

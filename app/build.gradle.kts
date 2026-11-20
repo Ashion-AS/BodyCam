@@ -64,9 +64,9 @@ android {
 }
 
 dependencies {
-    // fMP4 封装：MediaMuxer 的 MUXER_OUTPUT_FRAGMENTED_MPEG_4 是设备私有扩展
-    // （AOSP 根本没有该常量），强杀时 moov 尚未落盘，文件不可播放。
-    // media3 的 FragmentedMp4Muxer 真正做 ftyp+moov 前置、moof+mdat 分片，
-    // 进程被杀死后已写的分片仍可直接播放。
     implementation("androidx.media3:media3-muxer:1.11.1")
+    // 播放：fMP4 是分片封装，系统 MediaPlayer（VideoView 底层）拖动进度条 seek 会报
+    // MEDIA_ERROR_UNKNOWN；ExoPlayer 的 FragmentedMp4Extractor 会建立样本索引，可正常 seek。
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
 }

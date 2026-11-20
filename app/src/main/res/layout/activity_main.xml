@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  主界面 = 取景器。除了一条顶栏和右下两个控件，屏幕上不该有别的浮层。
+  主界面 = 取景器。除了一条顶栏、底部操作坞和校准行，屏幕上不该有别的浮层。
 
   分区（和为什么）：
     顶栏   56dp 的信息带：左「仪器读数 + 按键提示」，中「计时」，右「仪器状态 + 设置」
     左下   留给水印（由 GL 直接烧进画面，不在布局里）
-    右下   两个控件竖向排布：次要在上（拍照），主控件在下（录像），单手握持拇指行程最短
+    底部   操作坞：拍照 / 录像 / 录音 / 文件，四枚圆形按钮横排，上图标下文字
     顶栏下 调试校准行，可点，只给现场校准方向用
 
   所有颜色 / 字号 / 间距都来自 values/colors.xml、dimens.xml、styles.xml，
@@ -113,18 +113,6 @@
                     android:background="@drawable/dot_pre_record"
                     android:visibility="gone" />
 
-                <!-- 独立录音页入口 -->
-                <ImageView
-                    android:id="@+id/btnAudioRecord"
-                    android:layout_width="@dimen/touch_target"
-                    android:layout_height="@dimen/touch_target"
-                    android:layout_marginStart="@dimen/space_xs"
-                    android:background="@drawable/bg_icon_button"
-                    android:contentDescription="@string/title_audio_record"
-                    android:focusable="true"
-                    android:padding="@dimen/space_sm"
-                    android:src="@drawable/ic_mic" />
-
                 <ImageView
                     android:id="@+id/btnSettings"
                     android:layout_width="@dimen/touch_target"
@@ -159,41 +147,149 @@
     </LinearLayout>
 
     <!--
-      右下：次要控件在上（拍照），主控件在下（录像）。
-      竖向排布是为了把左下角整块让给水印，不与之抢位置。
+      底部操作坞：拍照 / 录像 / 录音 / 文件，四枚圆形按钮横排。
+      每枚都是「上图标、下文字」，拇指行程最短；录像仍是唯一实心红的主控件。
+      录音与文件从这里进，顶栏不再保留同类入口。
     -->
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:id="@+id/dockBar"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
-        android:layout_marginEnd="@dimen/space_lg"
-        android:layout_marginBottom="@dimen/space_lg"
-        android:gravity="center_horizontal"
-        android:orientation="vertical">
+        android:layout_gravity="bottom"
+        android:layout_marginHorizontal="@dimen/space_sm"
+        android:layout_marginBottom="@dimen/space_md"
+        android:background="@drawable/bg_dock_bar"
+        android:baselineAligned="false"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="@dimen/space_2xs"
+        android:paddingVertical="@dimen/space_sm">
 
-        <TextView
+        <!-- 拍照 -->
+        <LinearLayout
             android:id="@+id/btnShutter"
-            style="@style/BodyCamLabel"
-            android:layout_width="@dimen/control_size"
-            android:layout_height="@dimen/control_size"
-            android:background="@drawable/bg_btn_capture"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackground"
             android:clickable="true"
+            android:contentDescription="@string/btn_capture"
             android:focusable="true"
-            android:gravity="center"
-            android:text="@string/btn_capture" />
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingVertical="@dimen/space_2xs">
 
-        <TextView
+            <ImageView
+                android:layout_width="@dimen/dock_button_size"
+                android:layout_height="@dimen/dock_button_size"
+                android:background="@drawable/bg_dock_button"
+                android:importantForAccessibility="no"
+                android:padding="@dimen/space_sm"
+                android:src="@drawable/ic_capture"
+                android:tint="@color/ink" />
+
+            <TextView
+                style="@style/BodyCamLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_2xs"
+                android:text="@string/btn_capture" />
+        </LinearLayout>
+
+        <!-- 录像：主控件 -->
+        <LinearLayout
             android:id="@+id/btnRecord"
-            style="@style/BodyCamLabel"
-            android:layout_width="@dimen/control_size"
-            android:layout_height="@dimen/control_size"
-            android:layout_marginTop="@dimen/space_lg"
-            android:background="@drawable/bg_btn_record"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackground"
             android:clickable="true"
+            android:contentDescription="@string/btn_record"
             android:focusable="true"
-            android:gravity="center"
-            android:text="@string/btn_record"
-            android:textColor="@color/ink" />
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingVertical="@dimen/space_2xs">
+
+            <ImageView
+                android:id="@+id/iconRecord"
+                android:layout_width="@dimen/dock_button_size"
+                android:layout_height="@dimen/dock_button_size"
+                android:background="@drawable/bg_dock_record"
+                android:importantForAccessibility="no"
+                android:padding="@dimen/space_sm"
+                android:src="@drawable/ic_record"
+                android:tint="@color/ink" />
+
+            <TextView
+                android:id="@+id/labelRecord"
+                style="@style/BodyCamLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_2xs"
+                android:text="@string/btn_record" />
+        </LinearLayout>
+
+        <!-- 录音 -->
+        <LinearLayout
+            android:id="@+id/btnAudioRecord"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:contentDescription="@string/title_audio_record"
+            android:focusable="true"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingVertical="@dimen/space_2xs">
+
+            <ImageView
+                android:layout_width="@dimen/dock_button_size"
+                android:layout_height="@dimen/dock_button_size"
+                android:background="@drawable/bg_dock_button"
+                android:importantForAccessibility="no"
+                android:padding="@dimen/space_sm"
+                android:src="@drawable/ic_mic"
+                android:tint="@color/ink" />
+
+            <TextView
+                style="@style/BodyCamLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_2xs"
+                android:text="@string/title_audio_record" />
+        </LinearLayout>
+
+        <!-- 文件 -->
+        <LinearLayout
+            android:id="@+id/btnFiles"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:contentDescription="@string/title_files"
+            android:focusable="true"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingVertical="@dimen/space_2xs">
+
+            <ImageView
+                android:layout_width="@dimen/dock_button_size"
+                android:layout_height="@dimen/dock_button_size"
+                android:background="@drawable/bg_dock_button"
+                android:importantForAccessibility="no"
+                android:padding="@dimen/space_sm"
+                android:src="@drawable/ic_folder"
+                android:tint="@color/ink" />
+
+            <TextView
+                style="@style/BodyCamLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_2xs"
+                android:text="@string/title_files" />
+        </LinearLayout>
     </LinearLayout>
 
 </FrameLayout>

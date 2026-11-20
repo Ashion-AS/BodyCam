@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  操作坞里的主按钮（录像）：红实心底 + 白字，与旧的右下录像键同一种红，不引入第二种强调。
+  聚焦时底色压深一档并加 2dp ink 描边。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item android:state_focused="true">
+        <shape android:shape="oval">
+            <solid android:color="@color/rec_fill_focus" />
+            <stroke
+                android:width="@dimen/rule_strong"
+                android:color="@color/ink" />
+        </shape>
+    </item>
+
+    <item>
+        <ripple android:color="@color/ripple_on_paper">
+            <item>
+                <shape android:shape="oval">
+                    <solid android:color="@color/rec_fill" />
+                </shape>
+            </item>
+        </ripple>
+    </item>
+</selector>

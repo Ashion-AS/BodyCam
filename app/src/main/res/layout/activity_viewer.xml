@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  媒体查看页：图片放大查看 / 视频播放 / 音频播放共用这一个壳。
+
+  顶栏（返回 + 文件名）+ 内容区。
+
+  视频用 media3 PlayerView：系统 VideoView 底层是 MediaPlayer，对 fMP4 的
+  分片索引支持不好，拖动进度条会报 MEDIA_ERROR_UNKNOWN；media3 的
+  FragmentedMp4Extractor 能为分片建索引，seek 正常。
+
+  播放控制统一交给 PlayerView 自带的控制器（播放/暂停、进度条、时间都是
+  ExoPlayer 官方样式），不再自绘任何播放按钮或时间文本。
+
+  内容区画面永远是黑的：视频和图片都需要中性地面，音频则把这块换成大图标。
+  颜色 / 字号 / 间距全部引用 values 下的令牌。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/paper"
+    android:orientation="vertical">
+
+    <!-- 顶栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/top_bar_height"
+        android:background="@drawable/bg_top_bar"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="@dimen/space_xs">
+
+        <TextView
+            android:id="@+id/btnBack"
+            style="@style/BodyCamTitle"
+            android:layout_width="@dimen/touch_target"
+            android:layout_height="@dimen/touch_target"
+            android:background="@drawable/bg_icon_button"
+            android:clickable="true"
+            android:contentDescription="@string/action_back"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="@string/glyph_back"
+            android:textColor="@color/ink" />
+
+        <TextView
+            android:id="@+id/titleView"
+            style="@style/BodyCamTitle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/space_xs"
+            android:layout_weight="1"
+            android:ellipsize="middle"
+            android:maxLines="1" />
+    </LinearLayout>
+
+    <!-- 内容区：图片与播放器共用；音频时播放器背后换成大图标 -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/paper_3">
+
+        <com.dsh.bodycam.ui.ZoomableImageView
+            android:id="@+id/imageView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
+        <!-- 音频：播放器没有画面，躺一个大话筒图标 -->
+        <ImageView
+            android:id="@+id/audioIcon"
+            android:layout_width="96dp"
+            android:layout_height="96dp"
+            android:layout_gravity="center"
+            android:contentDescription="@string/tab_audios"
+            android:padding="@dimen/space_md"
+            android:src="@drawable/ic_mic"
+            android:visibility="gone" />
+
+        <!--
+          视频与音频统一走 PlayerView 自带控制条（播放/暂停、进度、时间），
+          app:show_timeout 设为 0 = 控制条常驻、不自动隐藏，
+          现场操作时不用先点一下屏幕才出现按钮。
+        -->
+        <androidx.media3.ui.PlayerView
+            android:id="@+id/playerView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone"
+            app:show_buffering="when_playing"
+            app:show_timeout="0"
+            app:use_controller="true" />
+    </FrameLayout>
+
+</LinearLayout>

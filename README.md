@@ -26,8 +26,8 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 
 | 需求 | 实现 |
 | --- | --- |
-| 拍照 | 界面按钮 → `capturePhoto()` |
-| 开始/停止录像 | 界面按钮 → `toggleRecording()` |
+| 拍照 | 底部操作坞「拍照」按钮 → `capturePhoto()` |
+| 开始/停止录像 | 底部操作坞「录像」按钮 → `toggleRecording()` |
 | 外接触发（预留，两种方式可同时用） | 物理按键 keycode 或广播 action → `TriggerRouter` → 拍照 / 录像 / 录音；**默认全空，不占用任何键** |
 | 息屏不中断录像 | `KeepAliveService`（`camera\|microphone` 前台服务 + `PARTIAL_WAKE_LOCK`） |
 | 录像中拍照 | Camera2 单次 `capture()`，同时带 JPEG 与预览两个 target，不打断录像流 |
@@ -36,9 +36,11 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
 | 预录开启提示 | 顶栏右侧**黄点**（`preRecordDot`），设置页可开关 |
-| 独立录音（波形 + 二合一按钮） | `AudioRecordActivity` + `AudioRecorder`，顶栏话筒图标进入（见「八点六」） |
+| 独立录音（波形 + 二合一按钮） | `AudioRecordActivity` + `AudioRecorder`，底部操作坞「录音」按钮进入（见「八点六」） |
 | 录音 30 分钟自动分段 | `AudioRecorder`：编码器不停，只在分段点换新的 fMP4 封装器 |
+| 文件管理（图片 / 视频 / 音频） | `FilesActivity`：三个 tab 分别列出 `BodyCam/{Image,Video,Audio}` 下的文件，最新在最上；点击进入 `ViewerActivity` 看图 / 播视频 / 播音频 |
 | 强杀/掉电后文件仍可播放 | 录像与录音都写 **fMP4**（media3 `FragmentedMp4Muxer`），最多丢最后一个分片（2 秒） |
+| 录音/视频在 App 内可正常播放 | `util/MuxerFix` 收尾时回填 moov 的 duration 并修正音频同步样本位（见「八点八」「八点九」） |
 
 ---
 
@@ -86,6 +88,8 @@ app/src/main/
 │   ├── MainActivity.kt      # 界面、按键、拍照/录像调度、预录交接、水印节拍
 │   ├── SettingsActivity.kt  # 设置页：预录开关 + 预录时长
 │   ├── AudioRecordActivity.kt  # 独立录音页：波形 + 开始/停止二合一按钮
+│   ├── FilesActivity.kt     # 文件管理页：图片/视频/音频三个 tab，最新在最上
+│   ├── ViewerActivity.kt    # 媒体查看：图片缩放 / 视频播放 / 音频播放
 │   ├── camera/CameraController.kt   # Camera2：预览流 + JPEG 流 + 录像中拍照
 │   ├── record/SegmentRecorder.kt    # MediaCodec 编码 + fMP4 无缝分段
 │   ├── record/AudioRecorder.kt      # 纯音频录音（AAC → .m4a），同样 fMP4 无缝分段
@@ -95,6 +99,7 @@ app/src/main/
 │   ├── gl/WatermarkEngine.kt        # JNI 声明（与 jni_bridge.cpp 一一对应）
 │   ├── gl/GlPipeline.kt             # handle 生命周期封装
 │   ├── ui/WaveformView.kt           # 录音页的滚动声音波形（自定义 View）
+│   ├── ui/ZoomableImageView.kt      # 看图：双指缩放 / 拖动 / 双击放大
 │   ├── watermark/WatermarkPainter.kt    # Canvas 画时间/GPS/设备号（视频与照片共用）
 │   ├── watermark/PhotoWatermarker.kt    # 照片：EXIF 转正 + 叠水印 + 重编码
 │   ├── watermark/Telemetry.kt       # GPS
@@ -105,8 +110,9 @@ app/src/main/
 │   ├── core/SettingsStore.kt        # 预录设置 + 触发键/广播配置读写 + 变更回调
 │   ├── core/AppConfig.kt            # 所有可调参数集中在这里
 │   ├── util/Rotation.kt             # Surface 旋转常量 → 角度
-│   └── util/Storage.kt              # 文件落盘
-└── res/                             # 布局（主界面/设置页）、主题、图标、无障碍配置
+│   ├── util/MuxerFix.kt             # 回填 fMP4 的 duration、修正音频同步样本位（media3 muxer 的两个补丁）
+│   └── util/Storage.kt              # 文件落盘 + 文件页的目录枚举（list）
+└── res/                             # 布局（主界面/设置页/文件页/查看页）、主题、图标、无障碍配置
 ```
 
 ---
@@ -114,8 +120,10 @@ app/src/main/
 ## 四、构建
 
 环境：Android Studio（JDK 17+）、**compileSdk 36**、`targetSdk 33` / `minSdk 26`、
-NDK `25.1.8937393`、CMake `3.18.1`；AGP 8.10.0、Gradle 8.11.1、Kotlin 2.0.21。
-唯一第三方依赖是 `androidx.media3:media3-muxer:1.11.1`（fMP4 封装），因此
+NDK `25.1.8937393`、CMake `3.18.1`；AGP 8.10.0、Gradle 8.11.1、Kotlin 2.2.10。
+第三方依赖只有 media3 三件套：`media3-muxer`（写 fMP4）、`media3-exoplayer` 与
+`media3-ui`（播放 fMP4，见八章七节）。因为 media3 1.11.1 是 Kotlin 2.2 编译的构件，
+编译器版本必须与之同代，故 Kotlin 插件用 2.2.10。因此
 `gradle.properties` 需要 `android.useAndroidX=true`。
 
 ```bash
@@ -170,14 +178,16 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 
 ## 五、触发方式（按键 / 广播）与息屏
 
-界面本身只有两个按钮（拍照、录像）；音量键不再内置任何映射。要接外设或车机按键，
-用下面两种**可配置**的触发方式，二者可同时生效：
+界面底部是一条操作坞，四枚圆形按钮横排（上图标、下文字）：**拍照 / 录像 / 录音 / 文件**；
+音量键不再内置任何映射。要接外设或车机按键，用下面两种**可配置**的触发方式，
+二者可同时生效：
 
 | 操作 | 效果 |
 | --- | --- |
-| 界面「拍照」按钮 | 拍照（录像中也生效，闪光提示） |
-| 界面「录像」按钮 | 开始 / 停止录像 |
-| 顶栏话筒图标 | 进入独立录音页 |
+| 操作坞「拍照」按钮 | 拍照（录像中也生效，闪光提示） |
+| 操作坞「录像」按钮 | 开始 / 停止录像 |
+| 操作坞「录音」按钮 | 进入独立录音页 |
+| 操作坞「文件」按钮 | 进入文件管理页（图片 / 视频 / 音频三个 tab） |
 | 配置的**拍照键 keycode** | 与拍照按钮相同 |
 | 配置的**录像键 keycode** | 与录像按钮相同（按下切换开始/停止） |
 | 配置的**录音键 keycode** | 主界面：跳到录音页并直接开录；录音页：切换录音开始/停止 |
@@ -357,7 +367,7 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 除了录像，还提供一条**只录音**的链路，用于只关心声音、不需要画面的场景
 （例如现场口述、问询笔录）。它和录像互不影响：录音页不开相机，录像也不会被它打断。
 
-**入口**：主界面顶栏右侧**话筒图标** → 打开独立录音页。
+**入口**：主界面底部操作坞**话筒按钮** → 打开独立录音页。
 页面自上而下分三段：
 
 - **顶栏**：返回 + 标题；
@@ -386,6 +396,107 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
 
 **代价**：纯音频分段不涉及 I 帧对齐，切换瞬间的丢失比录像更小；录音期间的耗电
 主要来自麦克风采集与 AAC 编码，远低于录像。
+
+---
+
+## 八点七、文件管理（图片 / 视频 / 音频）
+
+**入口**：主界面底部操作坞**文件按钮** → `FilesActivity`。
+
+页面结构：顶栏（返回 + 标题）+ 三个等宽文字 tab + 一个列表。
+
+- **三个 tab** 分别对应 `Storage.Kind.IMAGE / VIDEO / AUDIO`，扫描
+  `BodyCam/Image`、`BodyCam/Video`、`BodyCam/Audio` 下的所有 `yyyyMMdd` 子目录；
+  选中 tab 的文字转琥珀色（与设置页分段选项同一套信号）。
+- **排序**：按文件修改时间倒序，时间相同再按文件名倒序——文件名里的
+  `yyyyMMdd_HHmmss_SSS` 精度到毫秒，同秒连拍也不会乱序，**最新的永远在最上面**。
+- **列表项**：`item_file.xml`，左文件名、右「体积 · 修改时间」，与设置页的行同构
+  （`paper_2` 底 + 1dp 分隔线，不叠卡片）。
+- 列表为空时显示 `files_empty`；没有「所有文件访问」权限时显示 `files_need_permission`。
+
+**点击文件**进入 `ViewerActivity`（`EXTRA_PATH` + `EXTRA_KIND`）：
+
+| 类型 | 查看方式 |
+| --- | --- |
+| 图片 | `ui/ZoomableImageView`：双指缩放（下限=适应屏幕、上限 4 倍）、拖动、双击在「适应屏幕 / 2 倍」间切换；解码前按屏幕尺寸算 `inSampleSize`，避免大图 OOM |
+| 视频 | media3 `ExoPlayer` + `PlayerView` **自带控制条**（播放/暂停、进度条、时间全是 ExoPlayer 官方样式，`show_timeout=0` 常驻不自动隐藏），进入即播；`onPause` 暂停 |
+| 音频 | 同一个 `ExoPlayer` / `PlayerView`，控制条照常可用；把 PlayerView 的遮罩底设透明，背后垫一个大话筒图标 |
+
+> 为什么不用系统 `VideoView` / `MediaPlayer`：成片是 fMP4（moof+mdat 分片、moov 无
+> 样本索引），系统 MediaPlayer 拖动进度条 seek 会报 `MEDIA_ERROR_UNKNOWN`
+> （`Error (-2147483648,0)`）。media3 的 `FragmentedMp4Extractor` 会为分片建立样本
+> 索引，seek 正常。
+
+`Storage.list()` 提供这套枚举，权限判断同样走 `StoragePermission`，
+与落盘链路共用同一份目录约定，不另起一套。
+
+---
+
+## 八点八、fMP4 的 duration 回填（录音放不出来的修复）
+
+**现象**：录音文件在 App 里点播放没反应，进度一直停在 `00:00`；同一个文件在
+电脑上用 VLC / ffmpeg 播放正常。
+
+**根因**：`FragmentedMp4Muxer` 在写首个样本之前就把 `ftyp+moov` 落盘（这正是强杀
+可播的前提），那时不可能知道总时长，于是三处 duration 一律写 0，`mvex` 里也不带
+`mehd`：
+
+- `mvhd.duration`（影片时长）
+- `tkhd.duration`（轨在影片时间轴上的时长）
+- `mdhd.duration`（轨自身媒体时间轴上的时长）
+
+media3 的 `FragmentedMp4Extractor` 读 moov 时按 `mehd` → 各轨 `tkhd` 的顺序取时长，
+两者都是 0 就判定为「完全分片化」，`durationUs` 变成 `C.TIME_UNSET`，`SeekMap`
+退化成 `Unseekable(TIME_UNSET)`。ExoPlayer 认为这条流没有内容，`READY` 之后立刻
+`ENDED`，一个样本都不送进解码器。**单轨文件必然踩到**（本工程的录音就是单轨）；
+视频因为有第二条轨兜底才没暴露。PC 端播放器会自己扫分片累计时长，所以能放。
+
+**修复**：`util/MuxerFix.kt`。关文件前（`Fmp4Segment.close()` 里、`commit()` 之前）
+扫一遍所有 `moof/traf/trun`，按 track 累计样本 duration，再写回上述三处：
+
+```
+mvhd.duration = max(各轨 durUs) * mvhd.timescale / 1e6
+tkhd.duration = 轨 durUs * mvhd.timescale / 1e6
+mdhd.duration = 该轨总 ticks（mdhd.timescale 计）
+```
+
+只覆盖 4 字节整型字段，**文件长度不变**，`tfhd` 里的绝对偏移
+（`base_data_offset`）也不受影响，所以对已写入的分片零影响。回填后
+`dur=6.08s`、`buffered=6.08s`，正常播到 `STATE_ENDED`。
+
+一处易错点：`tkhd` 的 `track_ID` 在 `bodyStart+12`（version/flags 4 + creation 4 +
+modification 4 之后才是 track_ID），按 `+8` 读会读到恒为 0 的 modification_time，
+导致 track 匹配不上、累计时长全变 0。
+
+## 八点九、音频轨「有画面没声音」的修复
+
+**现象**：录制的视频在 App 内播放有画面但**完全没声音**，音量拉满也一样；同一个
+文件用系统「相册」或电脑播放器播放**有声音**，用「文件极客」之类的播放器则同样
+无声。
+
+**根因**：`FragmentedMp4Muxer` 依据 `MimeTypes.allSamplesAreSyncSamples(mimeType,
+codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构造音频
+`Format` 时没设 `codecs`，`codecs` 为 null 时该函数对 AAC 返回 false，于是**每个
+音频样本都被写成非同步样本**（`0x1010000`，bit16=1）。media3 的
+`FragmentedMp4Extractor` 判定同步帧的规则是
+`sampleIsSyncFrameTable[i] = ((sampleFlags >> 16) & 0x1) == 0`，整条音轨没有任何
+可解码起点，于是**整条音轨被丢弃** —— 有画面无声音。系统相册/PC 播放器不看这一位，
+所以能出声。
+
+**修复**（两处）：
+
+1. 源头：`Fmp4Segment.toAudioFormat()` 增加 `.setCodecs(CodecSupport.AAC_CODECS_LC)`
+   （`"mp4a.40.2"`），muxer 据此把音频样本标成同步样本（`0x2000000`，bit16=0）。
+2. 兜底：`MuxerFix.patchSampleSyncFlags()` 在打开文件时扫描所有 `moof/traf`，只对
+   `hdlr` 为 `soun` 的音轨把样本 flags 的 bit16 清零，让**历史录制文件**也能恢复
+   声音。只改 4 字节整型字段，幂等，不改变文件长度与 chunk 偏移。
+
+`MuxerFix.patchDurations()` 现在先做这一步再回填 duration，`ViewerActivity` 在
+`prepare()` 前于后台线程调用它，因此旧文件第一次被打开时即被就地修好。
+
+验证：音轨样本 flags 由 `0x1010000` 变为 `0x2000000`；App 内播放时
+`dumpsys media.audio_flinger` 出现 `1 Tracks of which 1 are active`，
+`G db=0`、`Underruns=0`。
 
 ---
 
@@ -500,8 +611,8 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
 
 - 全部 Kotlin，包名 `com.dsh.bodycam`，按职责分包：`camera` / `record` / `gl` / `watermark` / `service` / `key` / `core` / `util` / `ui`
 - 缩进 4 空格、UTF-8、LF；规则见 `.editorconfig`、`.gitattributes`
-- 唯一第三方依赖是 `androidx.media3:media3-muxer`（只取 fMP4 封装，不引入
-  Player/UI 模块）；其余全部手写，减少体积与构建变量
+- 第三方依赖只有 media3：`media3-muxer`（fMP4 封装）、`media3-exoplayer` /
+  `media3-ui`（fMP4 播放与 seek）；其余全部手写，减少体积与构建变量
 - **界面颜色、字号、间距一律走令牌**：`res/values/colors.xml`、`dimens.xml`、`styles.xml`。
   布局和 drawable 里不写十六进制色值，也不写 `13sp` 这种游离字号——真要加一档，
   先往令牌文件里加。

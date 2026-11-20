@@ -119,6 +119,9 @@ internal class Fmp4Segment private constructor(
             entry.abort()
             false
         } else {
+            // muxer 写 moov 时还不知道总时长，duration 全是 0；不补的话
+            // ExoPlayer 会认为流时长 0，READY 后立刻 ENDED（单轨音频必现）
+            entry.patchDurations()
             entry.commit()
             true
         }
@@ -177,10 +180,20 @@ internal fun MediaFormat.toVideoFormat(rotationDegrees: Int): Format =
         .apply { buildCsd(this@toVideoFormat)?.let(::setInitializationData) }
         .build()
 
-/** 音频轨格式。esds 盒只需要 csd-0 */
+/**
+ * 音频轨格式。esds 盒只需要 csd-0。
+ *
+ * `codecs` 必须填：media3 的 `FragmentedMp4Muxer` 用
+ * `MimeTypes.allSamplesAreSyncSamples(mimeType, codecs)` 决定 trun 里每个样本的
+ * `sample_is_non_sync_sample` 位。AAC 分支在 codecs 为 null 时返回 false，于是
+ * 整条音轨的样本都被标成「非同步」，ExoPlayer 找不到可解码起点，整段音频被丢弃
+ * —— 表现就是「能播、有进度、但完全没声音」，而系统相册/电脑播放器不看这个位，
+ * 所以照常有声。
+ */
 internal fun MediaFormat.toAudioFormat(): Format =
     Format.Builder()
         .setSampleMimeType(getString(MediaFormat.KEY_MIME))
+        .setCodecs(AAC_CODECS_LC)
         .setChannelCount(getInteger(MediaFormat.KEY_CHANNEL_COUNT))
         .setSampleRate(getInteger(MediaFormat.KEY_SAMPLE_RATE))
         .apply { buildCsd(this@toAudioFormat)?.let(::setInitializationData) }

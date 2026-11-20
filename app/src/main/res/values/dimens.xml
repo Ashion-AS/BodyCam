@@ -35,5 +35,7 @@
     <dimen name="control_size">64dp</dimen>
     <dimen name="status_dot">8dp</dimen>
     <dimen name="control_bar_height">72dp</dimen>
+    <!-- 底部操作坞：圆形图标按钮的直径，比 touch_target 大一档，拇指更容易命中 -->
+    <dimen name="dock_button_size">56dp</dimen>
 
 </resources>
