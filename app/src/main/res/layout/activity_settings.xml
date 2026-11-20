@@ -164,6 +164,45 @@
                     android:textColor="@color/accent" />
             </LinearLayout>
 
+            <!-- 行 4：调试校准行开关（默认关闭） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_debug_overlay_title" />
+
+                    <TextView
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_2xs"
+                        android:text="@string/settings_debug_overlay_summary" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swDebugOverlay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:minWidth="@dimen/touch_target"
+                    android:minHeight="@dimen/touch_target" />
+            </LinearLayout>
+
             <!-- 页脚：代价说清楚，不藏 -->
             <TextView
                 style="@style/BodyCamHint"

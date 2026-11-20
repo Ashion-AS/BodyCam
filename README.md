@@ -86,7 +86,7 @@ app/src/main/
 │   └── jni_bridge.cpp       # JNI 入口：Surface→ANativeWindow、Bitmap→像素缓冲
 ├── java/com/dsh/bodycam/
 │   ├── MainActivity.kt      # 界面、按键、拍照/录像调度、预录交接、水印节拍
-│   ├── SettingsActivity.kt  # 设置页：预录开关 + 预录时长
+│   ├── SettingsActivity.kt  # 设置页：预录开关 + 预录时长 + 调试校准行开关
 │   ├── AudioRecordActivity.kt  # 独立录音页：波形 + 开始/停止二合一按钮
 │   ├── FilesActivity.kt     # 文件管理页：图片/视频/音频三个 tab，最新在最上
 │   ├── ViewerActivity.kt    # 媒体查看：图片缩放 / 视频播放 / 音频播放
@@ -195,7 +195,7 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 | 配置的**录像广播 action** | 收到该广播即切换录像 |
 | 配置的**录音广播 action** | 同录音键：主界面直接开录，录音页内切换 |
 | 通知栏「停止录像」 | 停止并保存 |
-| 顶栏右侧齿轮 | 进入设置页（预录开关与时长） |
+| 顶栏右侧齿轮 | 进入设置页（预录开关与时长、调试校准行开关） |
 | 顶栏右侧黄点 | 仅表示「预录缓冲在跑」，与当前是否在录像无关 |
 | 录音页内录音键 / 录像键 | 录音中停止录音（未配置时该页不拦截任何键） |
 
@@ -255,8 +255,8 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 
 ## 六点五、方向与画幅
 
-顶栏下方那块等宽读数（`S=.. D=.. R=..`，带细描边面板）就是方向计算的全部输入，
-`AppConfig.DEBUG_OVERLAY` 可关掉：
+顶栏下方那块等宽读数（`S=.. D=.. R=..`，带细描边面板）就是方向计算的全部输入。
+**默认隐藏**，需要时到设置页打开「调试校准行」开关（持久化，重启保持）：
 
 | 记号 | 含义 |
 | --- | --- |
@@ -271,7 +271,7 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 留黑边，所以竖屏下就是全屏竖屏画面。视频文件里没有 rotation 标记，任何播放器
 都按正向显示。
 
-**如果真机上预览/成片方向不对：不用改代码，直接点顶栏下方那块读数面板。**
+**如果真机上预览/成片方向不对：不用改代码，到设置页打开「调试校准行」，再点那块读数面板。**
 
 点一次校准角 +90°，在 `0 → 90 → 180 → 270` 之间循环，**只改变画面朝向，
 画幅始终是竖屏**。转到画面正了就停：
@@ -512,7 +512,7 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 | `WATERMARK_LEFT` / `WATERMARK_BOTTOM` | 水印左下角边距（0.045 / 0.045） |
 | `DEVICE_ID` | 水印上的设备编号，可改成警号 |
 | `KEEP_SCREEN_ON` | true 则常亮；默认 false，允许息屏继续录 |
-| `DEBUG_OVERLAY` | 左上角显示 `S/D/R` 与流/输出尺寸，定位方向问题用；正式使用建议关掉 |
+| `DEBUG_OVERLAY` | 调试校准行（`S/D/R` 与流/输出尺寸）的**默认**显示状态；默认 false，实际以设置页开关为准 |
 | `ROTATION_OVERRIDE` | 强制旋转角，`-1` 为自动；真机方向差 90° 时填相反角度 |
 
 画幅不写死：`R` 为 90/270 时输出 1080×1920，否则 1920×1080；
@@ -540,7 +540,7 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
    精确时长，可在文件关闭后用 `MediaMetadataRetriever` 重新写入或设
    `KEY_MEDIA_INFINITE`。
 6. **方向上报不规范的机型**：极少数设备的 `SENSOR_ORIENTATION` 与实际成像不符，
-   表现为画面整体差 90°。开 `DEBUG_OVERLAY` 看 `R`，用 `ROTATION_OVERRIDE`
+   表现为画面整体差 90°。到设置页打开「调试校准行」开关看 `R`，用 `ROTATION_OVERRIDE`
    填相反角度即可（画幅仍然是竖屏），不需要改算法。
 7. **预录的内存与功耗**：预录开启期间视频/音频编码器常驻，30 秒缓存约占 45MB 内存
    （按 12Mbps 估算），同时持续耗电。低配机或长时间桌面放置时建议用 5 秒档或关闭。
@@ -603,7 +603,7 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 | lint | 0 error |
 
 > 模拟器的虚拟相机画面本身会缓慢变化，无法作为方向基准；方向的最终判定
-> 以真机为准。若真机上整体差 90°，按「六点五」点那块读数面板校准即可。
+> 以真机为准。若真机上整体差 90°，按「六点五」在设置页打开调试校准行后点读数面板校准即可。
 
 ---
 

@@ -12,4 +12,7 @@
     <string name="settings_storage_missing">未开启，将无法保存文件。需在系统设置中允许「所有文件访问」</string>
     <string name="settings_storage_open">去开启</string>
     <string name="settings_storage_done">已开启</string>
+
+    <string name="settings_debug_overlay_title">调试校准行</string>
+    <string name="settings_debug_overlay_summary">主页预览左上角显示 S/D/R 角度与流尺寸，点一下循环校准方向。仅现场排障用，正式使用建议关闭</string>
 </resources>

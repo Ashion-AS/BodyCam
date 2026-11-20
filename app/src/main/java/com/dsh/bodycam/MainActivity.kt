@@ -186,6 +186,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
                 runOnUiThread {
                     applyPreRecordSetting()
                     refreshTriggerReceiver()
+                    updateDebugInfo()
                 }
             }
         }
@@ -526,7 +527,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     private fun updateDebugInfo() {
         if (!this::debugView.isInitialized) return
-        if (!AppConfig.DEBUG_OVERLAY) {
+        if (!SettingsStore.isDebugOverlayVisible(this)) {
             debugView.visibility = View.GONE
             return
         }

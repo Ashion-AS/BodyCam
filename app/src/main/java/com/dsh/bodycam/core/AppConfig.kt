@@ -32,8 +32,11 @@ object AppConfig {
     /** true = 常亮；执法记录仪一般设为 false，让屏幕可以自动熄灭继续录 */
     const val KEEP_SCREEN_ON = false
 
-    /** 调试：左上角显示 S/D/R 与流/输出尺寸，定位设备方向问题用；正式使用可关掉 */
-    const val DEBUG_OVERLAY = true
+    /**
+     * 调试校准行（左上角 S/D/R 与流/输出尺寸，可点校准方向）的**默认**显示状态。
+     * 运行期以设置页开关为准（持久化在 [SettingsStore]），这里只作为未设置过时的默认值。
+     */
+    const val DEBUG_OVERLAY = false
 
     /**
      * 强制画面旋转角度：-1 = 按传感器自动计算，0/90/180/270 = 强制使用。

@@ -29,6 +29,7 @@ object SettingsStore {
     private const val KEY_TRIGGER_ACTION_SHUTTER = "trigger_action_shutter"
     private const val KEY_TRIGGER_ACTION_RECORD = "trigger_action_record"
     private const val KEY_TRIGGER_ACTION_AUDIO = "trigger_action_audio"
+    private const val KEY_DEBUG_OVERLAY = "debug_overlay"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
@@ -67,6 +68,17 @@ object SettingsStore {
 
     fun setPreRecordSeconds(context: Context, seconds: Int) {
         prefs(context).edit().putInt(KEY_PRE_RECORD_SECONDS, seconds).apply()
+        listener?.onSettingsChanged()
+    }
+
+    // ------------------------------------------------------------ 调试
+
+    /** 主页面调试校准行（S/D/R 读数，可点校准）是否显示；默认隐藏 */
+    fun isDebugOverlayVisible(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_DEBUG_OVERLAY, AppConfig.DEBUG_OVERLAY)
+
+    fun setDebugOverlayVisible(context: Context, visible: Boolean) {
+        prefs(context).edit().putBoolean(KEY_DEBUG_OVERLAY, visible).apply()
         listener?.onSettingsChanged()
     }
 

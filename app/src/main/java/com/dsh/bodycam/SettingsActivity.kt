@@ -18,6 +18,7 @@ import com.dsh.bodycam.util.StoragePermission
 class SettingsActivity : Activity() {
 
     private lateinit var swPreRecord: Switch
+    private lateinit var swDebugOverlay: Switch
     private lateinit var durationSection: View
     private lateinit var rgDuration: RadioGroup
     private lateinit var storageRow: View
@@ -29,6 +30,7 @@ class SettingsActivity : Activity() {
         setContentView(R.layout.activity_settings)
 
         swPreRecord = findViewById(R.id.swPreRecord)
+        swDebugOverlay = findViewById(R.id.swDebugOverlay)
         durationSection = findViewById(R.id.durationSection)
         rgDuration = findViewById(R.id.rgDuration)
         storageRow = findViewById(R.id.storageRow)
@@ -44,6 +46,11 @@ class SettingsActivity : Activity() {
         swPreRecord.setOnCheckedChangeListener { _, checked ->
             SettingsStore.setPreRecordEnabled(this, checked)
             updateSections()
+        }
+
+        swDebugOverlay.isChecked = SettingsStore.isDebugOverlayVisible(this)
+        swDebugOverlay.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setDebugOverlayVisible(this, checked)
         }
 
         buildDurationOptions()
