@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  切换摄像头：相机轮廓 + 两枚相对的箭头（evenOdd 挖空）。
+  箭头一左一右，读作「换一个方向」；不做镜像/循环箭头，和设置齿轮区分开。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@color/muted"
+        android:fillType="evenOdd"
+        android:pathData="M9,3L7.17,5H4c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V7c0,-1.1 -0.9,-2 -2,-2h-3.17L15,3H9zM12.8,9.5L16.2,12L12.8,14.5Z M11.2,9.5L7.8,12L11.2,14.5Z" />
+</vector>

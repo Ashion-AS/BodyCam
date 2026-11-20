@@ -33,6 +33,31 @@ object AppConfig {
     const val KEEP_SCREEN_ON = false
 
     /**
+     * 拍照补光模式：关闭 / 自动（光线不足才闪）/ 强制（每次都闪）。
+     * 运行期以设置页选择为准（持久化在 [SettingsStore]），这里是默认值。
+     */
+    const val PHOTO_FLASH_OFF = 0
+    const val PHOTO_FLASH_AUTO = 1
+    const val PHOTO_FLASH_ALWAYS = 2
+
+    /**
+     * 固定节点的灯光通路（sysfs）。
+     *
+     * 整机把补光灯 / 红外灯接在 GPIO 或 LED 驱动上时，填上对应节点路径，
+     * 应用会直接写 `1`（开）/ `0`（关）。**留空表示该灯未接入**，代码会自动
+     * 跳过这条通路、回退到相机闪光灯或隐藏入口。
+     *
+     * 典型路径：
+     *   - 白光补光：`/sys/class/leds/flashlight/brightness`
+     *   - 红外灯：  `/sys/class/leds/ir_led/brightness`
+     *
+     * 注意：写 sysfs 需要 root 或该节点对应用开放了写权限（SELinux 放行），
+     * 否则写入会失败——失败只记日志，不影响其它功能。
+     */
+    const val LIGHT_NODE_TORCH = ""
+    const val LIGHT_NODE_IR = ""
+
+    /**
      * 调试校准行（左上角 S/D/R 与流/输出尺寸，可点校准方向）的**默认**显示状态。
      * 运行期以设置页开关为准（持久化在 [SettingsStore]），这里只作为未设置过时的默认值。
      */

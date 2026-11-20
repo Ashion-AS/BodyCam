@@ -30,6 +30,8 @@ object SettingsStore {
     private const val KEY_TRIGGER_ACTION_RECORD = "trigger_action_record"
     private const val KEY_TRIGGER_ACTION_AUDIO = "trigger_action_audio"
     private const val KEY_DEBUG_OVERLAY = "debug_overlay"
+    private const val KEY_CAMERA_ID = "camera_id"
+    private const val KEY_PHOTO_FLASH = "photo_flash"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
@@ -79,6 +81,30 @@ object SettingsStore {
 
     fun setDebugOverlayVisible(context: Context, visible: Boolean) {
         prefs(context).edit().putBoolean(KEY_DEBUG_OVERLAY, visible).apply()
+        listener?.onSettingsChanged()
+    }
+
+    // ------------------------------------------------------------ 相机
+
+    /** 上次选用的摄像头 id；空串 = 用默认（优先后摄）。下次启动恢复 */
+    fun cameraId(context: Context): String =
+        prefs(context).getString(KEY_CAMERA_ID, "") ?: ""
+
+    fun setCameraId(context: Context, cameraId: String) {
+        if (cameraId.isEmpty()) {
+            prefs(context).edit().remove(KEY_CAMERA_ID).apply()
+        } else {
+            prefs(context).edit().putString(KEY_CAMERA_ID, cameraId).apply()
+        }
+        listener?.onSettingsChanged()
+    }
+
+    /** 拍照补光：见 [AppConfig.PHOTO_FLASH_OFF] / AUTO / ALWAYS */
+    fun photoFlashMode(context: Context): Int =
+        prefs(context).getInt(KEY_PHOTO_FLASH, AppConfig.PHOTO_FLASH_OFF)
+
+    fun setPhotoFlashMode(context: Context, mode: Int) {
+        prefs(context).edit().putInt(KEY_PHOTO_FLASH, mode).apply()
         listener?.onSettingsChanged()
     }
 

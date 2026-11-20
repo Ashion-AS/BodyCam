@@ -20,6 +20,8 @@
     <!-- 字号 -->
     <dimen name="text_sm">12sp</dimen>
     <dimen name="text_md">14sp</dimen>
+    <!-- 顶栏读数专用：比正文大一档、比红色计时小一档，避免两行抢注意力 -->
+    <dimen name="text_readout">15sp</dimen>
     <dimen name="text_lg">16sp</dimen>
     <dimen name="text_xl">18sp</dimen>
 
@@ -34,8 +36,14 @@
     <dimen name="top_bar_height">56dp</dimen>
     <dimen name="control_size">64dp</dimen>
     <dimen name="status_dot">8dp</dimen>
+    <!-- 顶栏状态图标：只做状态指示，不承担点击，所以比 touch_target 小 -->
+    <dimen name="status_icon">18dp</dimen>
     <dimen name="control_bar_height">72dp</dimen>
     <!-- 底部操作坞：圆形图标按钮的直径，比 touch_target 大一档，拇指更容易命中 -->
     <dimen name="dock_button_size">56dp</dimen>
+
+    <!-- 竖向缩放条：宽度只放把手与读数，高度约占屏幕一半，拇指从边沿滑进来就够 -->
+    <dimen name="zoom_slider_width">44dp</dimen>
+    <dimen name="zoom_slider_height">280dp</dimen>
 
 </resources>

@@ -203,6 +203,36 @@
                     android:minHeight="@dimen/touch_target" />
             </LinearLayout>
 
+            <!-- 行 5：拍照补光 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_photo_flash_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgPhotoFlash"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_photo_flash_summary" />
+            </LinearLayout>
+
             <!-- 页脚：代价说清楚，不藏 -->
             <TextView
                 style="@style/BodyCamHint"

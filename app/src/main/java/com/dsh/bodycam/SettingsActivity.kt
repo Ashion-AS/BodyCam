@@ -8,6 +8,7 @@ import android.widget.RadioGroup
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.core.SettingsStore
 import com.dsh.bodycam.util.StoragePermission
 
@@ -19,6 +20,7 @@ class SettingsActivity : Activity() {
 
     private lateinit var swPreRecord: Switch
     private lateinit var swDebugOverlay: Switch
+    private lateinit var rgPhotoFlash: RadioGroup
     private lateinit var durationSection: View
     private lateinit var rgDuration: RadioGroup
     private lateinit var storageRow: View
@@ -31,6 +33,7 @@ class SettingsActivity : Activity() {
 
         swPreRecord = findViewById(R.id.swPreRecord)
         swDebugOverlay = findViewById(R.id.swDebugOverlay)
+        rgPhotoFlash = findViewById(R.id.rgPhotoFlash)
         durationSection = findViewById(R.id.durationSection)
         rgDuration = findViewById(R.id.rgDuration)
         storageRow = findViewById(R.id.storageRow)
@@ -54,6 +57,7 @@ class SettingsActivity : Activity() {
         }
 
         buildDurationOptions()
+        buildPhotoFlashOptions()
         updateSections()
     }
 
@@ -116,6 +120,53 @@ class SettingsActivity : Activity() {
                 getString(R.string.settings_pre_record_duration_fmt, seconds),
                 Toast.LENGTH_SHORT
             ).show()
+        }
+    }
+
+    /** 拍照补光：关闭 / 自动 / 强制，三选一，横排 */
+    private fun buildPhotoFlashOptions() {
+        val modes = intArrayOf(
+            AppConfig.PHOTO_FLASH_OFF,
+            AppConfig.PHOTO_FLASH_AUTO,
+            AppConfig.PHOTO_FLASH_ALWAYS
+        )
+        val labels = intArrayOf(
+            R.string.settings_photo_flash_off,
+            R.string.settings_photo_flash_auto,
+            R.string.settings_photo_flash_always
+        )
+        val current = SettingsStore.photoFlashMode(this)
+        rgPhotoFlash.orientation = RadioGroup.HORIZONTAL
+        modes.forEachIndexed { i, mode ->
+            val rb = RadioButton(this).apply {
+                id = View.generateViewId()
+                text = getString(labels[i])
+                textSize = 14f
+                setTextColor(resources.getColorStateList(R.color.pre_record_option_text, theme))
+                setButtonDrawable(null)
+                setBackgroundResource(R.drawable.bg_pre_record_option)
+                minHeight = resources.getDimensionPixelSize(R.dimen.touch_target)
+                minWidth = resources.getDimensionPixelSize(R.dimen.touch_target)
+                gravity = android.view.Gravity.CENTER
+                setPadding(
+                    resources.getDimensionPixelSize(R.dimen.space_sm),
+                    0,
+                    resources.getDimensionPixelSize(R.dimen.space_sm),
+                    0
+                )
+                isChecked = mode == current
+                tag = mode
+            }
+            val lp = RadioGroup.LayoutParams(
+                RadioGroup.LayoutParams.WRAP_CONTENT,
+                RadioGroup.LayoutParams.WRAP_CONTENT
+            )
+            lp.marginEnd = resources.getDimensionPixelSize(R.dimen.space_xs)
+            rgPhotoFlash.addView(rb, lp)
+        }
+        rgPhotoFlash.setOnCheckedChangeListener { _, checkedId ->
+            val rb = findViewById<RadioButton>(checkedId) ?: return@setOnCheckedChangeListener
+            SettingsStore.setPhotoFlashMode(this, rb.tag as Int)
         }
     }
 

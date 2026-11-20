@@ -3,7 +3,7 @@
   主界面 = 取景器。除了一条顶栏、底部操作坞和校准行，屏幕上不该有别的浮层。
 
   分区（和为什么）：
-    顶栏   56dp 的信息带：左「仪器读数 + 按键提示」，中「计时」，右「仪器状态 + 设置」
+    顶栏   56dp 的信息带：左「读数 + 计时」两行，右「仪器状态 + 补光 / 切摄 / 设置」
     左下   留给水印（由 GL 直接烧进画面，不在布局里）
     底部   操作坞：拍照 / 录像 / 录音 / 文件，四枚圆形按钮横排，上图标下文字
     顶栏下 调试校准行，可点，只给现场校准方向用
@@ -46,56 +46,53 @@
             android:paddingHorizontal="@dimen/space_md"
             android:paddingVertical="@dimen/space_xs">
 
-            <!-- 左：读数与按键提示，两行等宽字体 -->
+            <!-- 左：两行上下居中——上为仪器读数，下为录像计时 -->
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_gravity="start|center_vertical"
                 android:orientation="vertical">
 
-                <LinearLayout
+                <!--
+                  读数比下面那行计时略大：它是常驻信息，一眼要能读到分辨率与帧率。
+                  只在本控件覆盖字号，不动 BodyCamInstrumentOverlay（调试校准行也在用）。
+                -->
+                <TextView
+                    android:id="@+id/statusView"
+                    style="@style/BodyCamInstrumentOverlay"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
+                    android:text="@string/status_booting"
+                    android:textSize="@dimen/text_readout" />
+
+                <!--
+                  第二行：不录像时显示录像图标，录像时换成红色计时。
+                  两个控件叠在同一个 FrameLayout 里，计时保持 INVISIBLE 占位，
+                  这样这行的高度恒定，录制开始/结束时顶栏不会跳动。
+                -->
+                <FrameLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_3xs">
+
+                    <ImageView
+                        android:id="@+id/iconRecordStatus"
+                        android:layout_width="@dimen/status_icon"
+                        android:layout_height="@dimen/status_icon"
+                        android:layout_gravity="start|center_vertical"
+                        android:importantForAccessibility="no"
+                        android:src="@drawable/ic_record"
+                        android:tint="@color/ink" />
 
                     <TextView
-                        android:id="@+id/statusView"
-                        style="@style/BodyCamInstrumentOverlay"
+                        android:id="@+id/timerView"
+                        style="@style/BodyCamInstrumentLargeOverlay"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="@string/status_booting" />
-
-                    <View
-                        android:id="@+id/recDot"
-                        android:layout_width="@dimen/status_dot"
-                        android:layout_height="@dimen/status_dot"
-                        android:layout_marginStart="@dimen/space_xs"
-                        android:background="@drawable/dot_rec"
+                        android:text="@string/timer_zero"
                         android:visibility="invisible" />
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/hintView"
-                    style="@style/BodyCamHintOverlay"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_3xs"
-                    android:text="@string/hint_keys" />
+                </FrameLayout>
             </LinearLayout>
-
-            <!--
-              中：录像计时。始终居中，不受左右内容宽度影响。
-              红字靠深色投影把紧邻的一圈压暗来立住，不垫底色块，也不描边（描边会加粗字形）。
-            -->
-            <TextView
-                android:id="@+id/timerView"
-                style="@style/BodyCamInstrumentLargeOverlay"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center"
-                android:text="@string/timer_zero"
-                android:visibility="gone" />
 
             <!-- 右：预录缓冲状态 + 设置入口 -->
             <LinearLayout
@@ -111,6 +108,34 @@
                     android:layout_width="@dimen/status_dot"
                     android:layout_height="@dimen/status_dot"
                     android:background="@drawable/dot_pre_record"
+                    android:visibility="gone" />
+
+                <!-- 补光灯：开着时图标转琥珀，一眼可辨；无闪光灯的机型隐藏 -->
+                <ImageView
+                    android:id="@+id/btnTorch"
+                    android:layout_width="@dimen/touch_target"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="@dimen/space_xs"
+                    android:background="@drawable/bg_icon_button"
+                    android:contentDescription="@string/action_torch"
+                    android:focusable="true"
+                    android:padding="@dimen/space_sm"
+                    android:src="@drawable/ic_flash"
+                    android:tint="@color/muted"
+                    android:visibility="gone" />
+
+                <!-- 切换摄像头：多摄机型才显示 -->
+                <ImageView
+                    android:id="@+id/btnSwitchCamera"
+                    android:layout_width="@dimen/touch_target"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="@dimen/space_xs"
+                    android:background="@drawable/bg_icon_button"
+                    android:contentDescription="@string/action_switch_camera"
+                    android:focusable="true"
+                    android:padding="@dimen/space_sm"
+                    android:src="@drawable/ic_switch_camera"
+                    android:tint="@color/muted"
                     android:visibility="gone" />
 
                 <ImageView
@@ -145,6 +170,18 @@
             android:paddingVertical="@dimen/space_xs"
             android:visibility="gone" />
     </LinearLayout>
+
+    <!--
+      竖向缩放条：贴右侧边缘、纵向居中，拇指自然落点。
+      只在当前摄像头支持数字变焦（zoomMax > 1）时由代码显示，否则 GONE。
+    -->
+    <com.dsh.bodycam.ui.ZoomSliderView
+        android:id="@+id/zoomSlider"
+        android:layout_width="@dimen/zoom_slider_width"
+        android:layout_height="@dimen/zoom_slider_height"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="@dimen/space_xs"
+        android:visibility="gone" />
 
     <!--
       底部操作坞：拍照 / 录像 / 录音 / 文件，四枚圆形按钮横排。

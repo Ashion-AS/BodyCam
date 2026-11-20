@@ -15,4 +15,10 @@
 
     <string name="settings_debug_overlay_title">调试校准行</string>
     <string name="settings_debug_overlay_summary">主页预览左上角显示 S/D/R 角度与流尺寸，点一下循环校准方向。仅现场排障用，正式使用建议关闭</string>
+
+    <string name="settings_photo_flash_title">拍照补光</string>
+    <string name="settings_photo_flash_summary">只影响拍照；录像过程中需要补光时，用主界面顶栏的闪电按钮开常亮</string>
+    <string name="settings_photo_flash_off">关闭</string>
+    <string name="settings_photo_flash_auto">自动</string>
+    <string name="settings_photo_flash_always">强制</string>
 </resources>

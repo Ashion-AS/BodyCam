@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -22,11 +23,13 @@ import android.view.WindowManager
 import android.widget.TextView
 import android.widget.Toast
 import com.dsh.bodycam.camera.CameraController
+import com.dsh.bodycam.camera.CameraSpec
 import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.core.SettingsStore
 import com.dsh.bodycam.core.TriggerRouter
 import com.dsh.bodycam.gl.GlPipeline
 import com.dsh.bodycam.key.TriggerReceiver
+import com.dsh.bodycam.light.LightController
 import com.dsh.bodycam.record.PreRecordBuffer
 import com.dsh.bodycam.record.SegmentRecorder
 import com.dsh.bodycam.service.KeepAliveService
@@ -60,25 +63,51 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         private const val PREFS = "bodycam"
         private const val KEY_ROTATION_OFFSET = "rotation_offset"
 
-        /** 未手动校准过的默认偏移：本机相机 SurfaceTexture 需要额外转 270° 才正向 */
-        private const val DEFAULT_ROTATION_OFFSET = 270
+        /**
+         * 未手动校准过的默认偏移：让净旋转归零（开箱即正向）。
+         *
+         * 前后摄的传感器方向不同（后摄多为 90，前摄多为 270），所以默认偏移
+         * 不能共用：用同一个 270 去校准前摄会得到净旋转 180，画面上下颠倒。
+         * 按当前摄像头的传感器角度现算，后摄 90 → 270、前摄 270 → 90，两者都归零。
+         */
+        private fun defaultRotationOffset(sensorOrientation: Int): Int =
+            (360 - sensorOrientation % 360) % 360
+
+        /**
+         * 方向校准按摄像头分开存。不同摄像头的传感器方向与变换矩阵互不相干，
+         * 后摄校准好的偏移套到前摄上一定是错的，所以键名带上 cameraId。
+         */
+        private fun rotationKey(cameraId: String) = "rotation_offset_$cameraId"
     }
 
     private lateinit var previewView: SurfaceView
     private lateinit var flashView: View
     private lateinit var statusView: TextView
     private lateinit var timerView: TextView
-    private lateinit var recDot: View
     private lateinit var btnShutter: View
     private lateinit var btnRecord: View
     private lateinit var iconRecord: android.widget.ImageView
+
+    /** 顶栏第二行的录像图标：空闲时显示，录像时让位给红色计时 */
+    private lateinit var iconRecordStatus: android.widget.ImageView
     private lateinit var labelRecord: TextView
-    private lateinit var hintView: TextView
     private lateinit var debugView: TextView
     private lateinit var preRecordDot: View
     private lateinit var btnSettings: View
     private lateinit var btnAudioRecord: View
     private lateinit var btnFiles: View
+    private lateinit var btnTorch: android.widget.ImageView
+    private lateinit var btnSwitchCamera: android.widget.ImageView
+    private lateinit var zoomSlider: com.dsh.bodycam.ui.ZoomSliderView
+
+    /** 当前使用的摄像头能力；切换摄像头时整体替换 */
+    private var currentSpec: CameraSpec? = null
+
+    /** 设备上所有可用摄像头（后摄在前），多于一个才显示切换入口 */
+    private var cameras: List<CameraSpec> = emptyList()
+
+    /** 补光灯的相机通路；LightController 建好后注入，销毁时注销 */
+    private val torchPath = TorchPath()
 
     private var pipeline: GlPipeline? = null
     private var surfaceTexture: SurfaceTexture? = null
@@ -106,9 +135,10 @@ class MainActivity : Activity(), TriggerRouter.Listener {
      * 方向校准偏移：在自动算出的角度上再加这个值。
      * 不同机型相机 SurfaceTexture 的变换矩阵不一样（有的还带镜像），
      * 自动值可能差 90°，点一下调试行就能循环调整并持久化。
-     * 默认取 [DEFAULT_ROTATION_OFFSET]，本机开箱即正向，无需手动点。
+     * 未校准过时按当前摄像头的传感器角度取默认值（见 [defaultRotationOffset]），
+     * 前后摄各自归零，开箱即正向。
      */
-    private var rotationOffset = DEFAULT_ROTATION_OFFSET
+    private var rotationOffset = 0
 
     private var recording = false
     private var recordStartElapsed = 0L
@@ -165,6 +195,10 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
         TriggerRouter.claimMainListener(this)
 
+        // 灯光统一的控制入口：相机闪光灯通路 + 可选的 sysfs 固定节点通路
+        LightController.init()
+        LightController.attachCameraTorch(torchPath)
+
         telemetry = Telemetry(this).also { it.start() }
 
         previewView.holder.addCallback(surfaceCallback)
@@ -179,6 +213,10 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         btnFiles.setOnClickListener {
             FilesActivity.launch(this)
         }
+        btnTorch.setOnClickListener { toggleTorch() }
+        btnSwitchCamera.setOnClickListener { switchCamera() }
+        // 拖动/点击缩放条 → 直接改相机数字变焦，不重建会话，录像中也能调
+        zoomSlider.onZoomChanged = { ratio -> camera?.setZoom(ratio) }
 
         // 设置变化（预录开关/时长、触发键/广播）→ 刷新缓存与黄点、重挂广播
         settingsListener = object : SettingsStore.Listener {
@@ -187,18 +225,22 @@ class MainActivity : Activity(), TriggerRouter.Listener {
                     applyPreRecordSetting()
                     refreshTriggerReceiver()
                     updateDebugInfo()
+                    camera?.setPhotoFlashMode(SettingsStore.photoFlashMode(this@MainActivity))
                 }
             }
         }
         SettingsStore.setListener(settingsListener)
         refreshTriggerReceiver()
 
-        // 方向校准：点调试行每次 +90°，可选 0/90/180/270，写入 SharedPreferences
+        // 方向校准：点调试行每次 +90°，可选 0/90/180/270，按摄像头分别写入
+        // 初始偏移在 setup() 里按选中的摄像头读取，这里只挂点击
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-        rotationOffset = prefs.getInt(KEY_ROTATION_OFFSET, DEFAULT_ROTATION_OFFSET)
         debugView.setOnClickListener {
             rotationOffset = (rotationOffset + 90) % 360
-            prefs.edit().putInt(KEY_ROTATION_OFFSET, rotationOffset).apply()
+            val id = currentSpec?.cameraId
+            if (id != null) {
+                prefs.edit().putInt(rotationKey(id), rotationOffset).apply()
+            }
             applyOrientation()
             updateWatermark()
             toast(getString(R.string.rotation_offset, rotationOffset, rotationDeg, videoW, videoH))
@@ -269,6 +311,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
+        // 前摄模式下亮的是别的摄像头的 LED，退出页面必须手工关掉
+        releaseLights()
+        LightController.detachCameraTorch()
         settingsListener?.let { SettingsStore.clearListener(it) }
         settingsListener = null
         if (receiverRegistered) {
@@ -303,17 +348,19 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         flashView = findViewById(R.id.flashView)
         statusView = findViewById(R.id.statusView)
         timerView = findViewById(R.id.timerView)
-        recDot = findViewById(R.id.recDot)
         btnShutter = findViewById(R.id.btnShutter)
         btnRecord = findViewById(R.id.btnRecord)
         iconRecord = findViewById(R.id.iconRecord)
+        iconRecordStatus = findViewById(R.id.iconRecordStatus)
         labelRecord = findViewById(R.id.labelRecord)
-        hintView = findViewById(R.id.hintView)
         debugView = findViewById(R.id.debugView)
         preRecordDot = findViewById(R.id.preRecordDot)
         btnSettings = findViewById(R.id.btnSettings)
         btnAudioRecord = findViewById(R.id.btnAudioRecord)
         btnFiles = findViewById(R.id.btnFiles)
+        btnTorch = findViewById(R.id.btnTorch)
+        btnSwitchCamera = findViewById(R.id.btnSwitchCamera)
+        zoomSlider = findViewById(R.id.zoomSlider)
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -387,15 +434,19 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     private fun setup() {
         if (pipeline != null) return
-        val spec = CameraController.probe(this)
+        cameras = CameraController.listCameras(this)
+        val savedId = SettingsStore.cameraId(this)
+        // 从已枚举的列表里挑，避免再扫一遍 CameraCharacteristics
+        val spec = cameras.firstOrNull { it.cameraId == savedId }
+            ?: cameras.firstOrNull { !it.isFront }
+            ?: cameras.firstOrNull()
         if (spec == null) {
             toast(getString(R.string.no_camera))
             return
         }
-        // 相机流永远是传感器方向的尺寸；输出尺寸再按设备姿态交换
-        streamW = spec.videoSize.width
-        streamH = spec.videoSize.height
-        sensorOrientation = spec.sensorOrientation
+        applyCameraSpec(spec)
+        // 校准偏移按摄像头存，onCreate 时还不知道用哪颗，这里补读
+        loadRotationOffset()
         applyOrientation()
 
         val p = GlPipeline(videoW, videoH)
@@ -422,14 +473,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         recorder = SegmentRecorder(this)
         preRecordBuffer = PreRecordBuffer(this)
 
-        val controller = CameraController(
-            context = this,
-            spec = spec,
-            targetSurface = surface,
-            rotationProvider = { currentRotation() },
-            onPhoto = { bytes -> savePhoto(bytes) },
-            onError = { message -> runOnUiThread { toast(message) } }
-        )
+        val controller = buildCameraController(spec, surface)
         camera = controller
         controller.open()
 
@@ -443,6 +487,192 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         applyPreRecordSetting()
         // 水印时钟常驻：空闲时也要每秒刷新
         startTicker()
+    }
+
+    /**
+     * 记录当前相机能力并同步流尺寸/传感器角度。
+     * 相机流永远是传感器方向的尺寸；输出尺寸再按设备姿态交换（见 applyOrientation）。
+     */
+    private fun applyCameraSpec(spec: CameraSpec) {
+        currentSpec = spec
+        streamW = spec.videoSize.width
+        streamH = spec.videoSize.height
+        sensorOrientation = spec.sensorOrientation
+        // 每颗摄像头的变焦能力不同：切过去先按新上限重置到 1x，
+        // 不支持缩放的摄像头（zoomMax <= 1）由控件自己隐藏
+        zoomSlider.setZoomRange(spec.zoomMax)
+        updateCameraButtons()
+    }
+
+    /**
+     * 读取当前摄像头的校准偏移。
+     *
+     * 优先级：该摄像头自己存过的值 → 后摄沿用旧版全局键（老版本只校准过后摄）
+     * → 按传感器角度现算的默认值（前后摄各自归零，开箱即正向）。
+     */
+    private fun loadRotationOffset() {
+        val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val id = currentSpec?.cameraId
+        val fallback = defaultRotationOffset(sensorOrientation)
+        rotationOffset = when {
+            id == null -> fallback
+            prefs.contains(rotationKey(id)) -> prefs.getInt(rotationKey(id), fallback)
+            // 后摄沿用旧版全局键（老版本只校准过后摄）
+            currentSpec?.isFront == false ->
+                prefs.getInt(KEY_ROTATION_OFFSET, fallback)
+            else -> fallback
+        }
+    }
+
+    /**
+     * 顶栏入口显隐：多摄才给切换；补光灯是否可用交给 [LightController] 判断
+     * （相机 LED 或 sysfs 节点任一条接通就算可用）。
+     * 前摄本身通常没有 LED，但硬件 LED 挂在后摄上，切到前摄时补光按钮
+     * 仍然可用——改去点亮那颗带闪光灯的摄像头（见 [toggleTorch]）。
+     */
+    private fun updateCameraButtons() {
+        btnSwitchCamera.visibility = if (cameras.size > 1) View.VISIBLE else View.GONE
+        btnTorch.visibility =
+            if (LightController.available(LightController.Kind.TORCH)) View.VISIBLE else View.GONE
+        updateTorchButton()
+    }
+
+    /** 补光灯按钮高亮：开着琥珀，关着 muted（与其它顶栏图标一致） */
+    private fun updateTorchButton() {
+        if (!this::btnTorch.isInitialized) return
+        val on = LightController.isOn(LightController.Kind.TORCH)
+        btnTorch.setColorFilter(getColor(if (on) R.color.accent else R.color.muted))
+    }
+
+    // ------------------------------------------------------------ 摄像头控制
+
+    /**
+     * 相机闪光灯通路：当前摄像头自带 LED 时走预览重复请求的 TORCH（[CameraController.setTorch]），
+     * 录像中切换也不会打断编码；当前摄像头没有 LED（常见于前摄）时，用
+     * [CameraManager.setTorchMode] 点亮设备上另一颗带闪光灯的摄像头——那颗没被本应用打开，
+     * 不会 CAMERA_IN_USE。
+     */
+    private inner class TorchPath : LightController.CameraTorch {
+        /** 固定键：状态跨摄像头切换保留，切回来时按钮高亮不会错乱 */
+        override val key: String = "camera:torch"
+
+        override val available: Boolean
+            get() = currentSpec?.flashAvailable == true || fallbackTorchId() != null
+
+        override val isOn: Boolean
+            get() = camera?.isTorchOn == true || externalTorchOn
+
+        /** 用 setTorchMode 点亮的那颗外部摄像头 id；关灯后清空 */
+        private var externalTorchOn = false
+        private var externalTorchCameraId: String? = null
+
+        /** 当前摄像头有 LED 就用它自己，否则退到设备上任意一颗带闪光灯的（通常是后摄） */
+        private fun fallbackTorchId(): String? = cameras.firstOrNull { it.flashAvailable }?.cameraId
+
+        override fun set(on: Boolean): Boolean {
+            if (currentSpec?.flashAvailable == true) {
+                val cam = camera ?: return false
+                if (!cam.setTorch(on)) return false
+                // 相机自带的灯归控制器所有；外部灯若还亮着顺手关掉，避免两处同亮
+                if (on) releaseExternal()
+                return true
+            }
+            val id = fallbackTorchId() ?: return false
+            val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val ok = runCatching { manager.setTorchMode(id, on) }.isSuccess
+            if (!ok) return false
+            externalTorchOn = on
+            externalTorchCameraId = if (on) id else null
+            return true
+        }
+
+        /** 关掉外部点亮的补光灯（切摄像头 / 离开页面时调用） */
+        fun releaseExternal() {
+            val id = externalTorchCameraId ?: return
+            val manager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            runCatching { manager.setTorchMode(id, false) }
+            externalTorchOn = false
+            externalTorchCameraId = null
+        }
+    }
+
+    /** 一键补光：具体走哪条通路由 [LightController] 决定（相机 LED 优先，其次 sysfs 节点） */
+    private fun toggleTorch() {
+        if (!LightController.toggle(LightController.Kind.TORCH)) {
+            toast(getString(R.string.torch_unavailable))
+        }
+        updateTorchButton()
+    }
+
+    /** 切摄像头 / 退出页面前释放所有灯：外部 LED 不释放会一直亮到系统回收 */
+    private fun releaseLights() {
+        torchPath.releaseExternal()
+        LightController.releaseAll()
+    }
+
+    /**
+     * 切换摄像头（后摄→前摄→其它后摄…循环）。
+     *
+     * 录像中不允许切：摄像机会话整体重建，编码器拿不到连续帧。
+     * 切换顺序：先关旧设备 → 再开新设备（Camera2 同一时间只允许一个
+     * 活跃设备，先关后开才不会报 CAMERA_IN_USE）。
+     * SurfaceTexture 与 GlPipeline 复用，只按新 spec 更新流尺寸与旋转。
+     */
+    private fun switchCamera() {
+        if (recording || savingSegment) {
+            return toast(getString(R.string.camera_switch_blocked))
+        }
+        if (cameras.size <= 1) return
+        val currentId = currentSpec?.cameraId
+        val index = cameras.indexOfFirst { it.cameraId == currentId }
+        val next = cameras[(index + 1).mod(cameras.size)]
+        if (next.cameraId == currentId) return
+
+        val p = pipeline ?: return toast(getString(R.string.camera_not_ready))
+        val surface = cameraSurface ?: return
+
+        // 预录编码器按旧摄像头的画幅开好，切换前先停掉，切完按新画幅重建
+        preRecordBuffer?.takeIf { it.isRunning }?.let {
+            p.setPreRecordSurface(null)
+            it.release()
+        }
+
+        // 旧设备必须先释放（含 torch），否则新设备打开会 CAMERA_IN_USE
+        camera?.close()
+        camera = null
+        // 前摄模式下点亮的是另一颗摄像头的 LED，这台设备没被我们持有，要单独关掉
+        releaseLights()
+
+        applyCameraSpec(next)
+        // 每个摄像头有自己的校准偏移，切过去必须换一套，否则画面方向是错的
+        loadRotationOffset()
+        // 流尺寸可能不同（前后摄支持的分辨率集合不一样），SurfaceTexture 要跟着改，
+        // 否则相机会按旧尺寸出帧、画面被拉伸
+        surfaceTexture?.setDefaultBufferSize(streamW, streamH)
+        // applyOrientation 内部会在画幅变化时同步 setVideoSize + setRotation
+        applyOrientation()
+
+        val controller = buildCameraController(next, surface)
+        camera = controller
+        controller.open()
+        updateCameraButtons()
+        SettingsStore.setCameraId(this, next.cameraId)
+        toast(getString(R.string.camera_switched, next.label))
+        applyPreRecordSetting()
+    }
+
+    private fun buildCameraController(spec: CameraSpec, surface: Surface): CameraController {
+        val controller = CameraController(
+            context = this,
+            spec = spec,
+            targetSurface = surface,
+            rotationProvider = { currentRotation() },
+            onPhoto = { bytes -> savePhoto(bytes) },
+            onError = { message -> runOnUiThread { toast(message) } }
+        )
+        // 拍照补光策略来自设置，随控制器实例下发
+        controller.setPhotoFlashMode(SettingsStore.photoFlashMode(this))
+        return controller
     }
 
     /**
@@ -796,10 +1026,12 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         // 未录像：红实心 + 白字；录像中：反过来，深底 + 红字
         labelRecord.setTextColor(getColor(if (recording) R.color.rec_signal else R.color.ink))
         iconRecord.setColorFilter(getColor(if (recording) R.color.rec_signal else R.color.ink))
-        recDot.visibility = if (recording) View.VISIBLE else View.INVISIBLE
-        timerView.visibility = if (recording) View.VISIBLE else View.GONE
-        hintView.visibility = if (recording) View.GONE else View.VISIBLE
+        // 顶栏第二行：空闲显示录像图标，录像时换成红色计时（二者互斥占位，高度恒定）
+        iconRecordStatus.visibility = if (recording) View.GONE else View.VISIBLE
+        timerView.visibility = if (recording) View.VISIBLE else View.INVISIBLE
         updatePreRecordDot()
+        // 补光灯状态可能因会话重建而变化，按钮高亮每次都按真实状态重画
+        updateTorchButton()
     }
 
     private fun toast(message: String) {
