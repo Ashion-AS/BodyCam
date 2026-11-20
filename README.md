@@ -14,11 +14,11 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 
 <p align="center">
   <img src="docs/preview.png" width="300" alt="预览界面">
-  <img src="docs/photo_watermark.jpg" width="300" alt="照片水印">
+  <img src="docs/settings.png" width="300" alt="设置页">
 </p>
 
 > 左：实时预览（水印左下角，可用下方按钮或配置的外接触发操作）；
-> 右：拍照输出，方向已转正、水印已烧进画面。
+> 右：设置页，预录、循环录像、拍照与补光等开关都在这里。
 
 ---
 
@@ -33,6 +33,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 录像中拍照 | Camera2 单次 `capture()`，同时带 JPEG 与预览两个 target，不打断录像流 |
 | 时间水印（OpenGL + C++，低功耗） | `cpp/renderer.cpp` 合成 OES 纹理 + 水印纹理，EGL 直出到编码器 |
 | 30 分钟自动分段 | `SegmentRecorder`：编码器不停，只在分段点换一个新的 fMP4 封装器 |
+| 循环录像 / 磁盘兜底 | `DiskGuard`：剩余空间低于阈值时删最早的已结束分段，或安全停录（见「八点十」） |
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
 | 预录开启提示 | 顶栏右侧**黄点**（`preRecordDot`），设置页可开关 |
@@ -116,6 +117,7 @@ app/src/main/
 │   ├── core/AppConfig.kt            # 所有可调参数集中在这里
 │   ├── util/Rotation.kt             # Surface 旋转常量 → 角度
 │   ├── util/MuxerFix.kt             # 回填 fMP4 的 duration、修正音频同步样本位（media3 muxer 的两个补丁）
+│   ├── util/DiskGuard.kt            # 剩余空间检查 + 循环录像清理（只删 BodyCam/Video 下的 VID_ 分段）
 │   └── util/Storage.kt              # 文件落盘 + 文件页的目录枚举（list）
 └── res/                             # 布局（主界面/设置页/文件页/查看页）、主题、图标、无障碍配置
 ```
@@ -705,6 +707,47 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 
 ---
 
+## 八点十、循环录像与磁盘兜底
+
+长时间连续执法时存储一定会写满，写满之后继续写会失败、分段直接报废。`DiskGuard`
+把这件事兜住：录制期间按固定节奏查剩余空间，分两级处理。
+
+**入口**：设置页「循环录像」开关（默认关闭）+「空间告警阈值」四档（300MB / 500MB /
+1GB / 2GB，默认 500MB）。
+
+| 剩余空间 | 循环录像开 | 循环录像关 |
+| --- | --- | --- |
+| ≥ 告警阈值 | 不动作 | 不动作 |
+| < 告警阈值 | 从旧到新删 `BodyCam/Video` 下已结束的分段，删到回到阈值以上 | 提示「空间不足」，节流到 30 秒一次 |
+| < 强制停录线 | 同左（已无可删时也会触发）| **安全停录** |
+
+强制停录线 = 告警阈值 ÷ 5，且不低于 100MB。默认 500MB 告警 → 100MB 强制停。
+调大告警档位时停止线同步抬高，始终留出把当前分段正常收尾的余量。
+
+### 边界处理
+
+| 方面 | 行为 |
+| --- | --- |
+| 清理范围 | **只扫 `BodyCam/Video/yyyyMMdd/VID_*.mp4`**。不碰系统或其它应用的文件，也不碰用户手动放进目录的其它 mp4——前缀不是 `VID_` 的一律跳过 |
+| 删除顺序 | 修改时间升序（同时间按名字升序），最早的分段先走 |
+| 当前分段 | `SegmentRecorder.currentSegmentName` 暴露正在写的文件名，清理时逐个比对跳过。用**回调实时查询**而不是一次性字符串：清理过程中可能刚好切到下一个分段 |
+| 收尾完整性 | 删除只发生在**已 `close()` 的分段**上；停录走正常 `stopRecording()`，编码器尾帧排空、最后一个 `moof+mdat` 照常写出，所以文件仍是可播放的 fMP4 |
+| 线程 | 巡检与删除都在单独的 `diskExecutor` 上跑，不占主线程、不卡预览；同一时刻只允许一次巡检 |
+| 媒体库 | 删完通知 `MediaScannerConnection` 移除索引，图库里不会留失效条目 |
+| 拒绝开录 | 循环录像关闭且空间已低于告警阈值时，直接拒绝开录——不然录到一半必然被迫中断 |
+| 提示 | 主界面 toast + 前台服务常驻通知正文（息屏也能看到） |
+
+### 为什么用两级阈值
+
+只有一级的话，要么告警太晚（来不及收尾）、要么一直告警。分成「告警」与「强制停」
+之后：告警线负责给用户留出清理或缓存的时间，强制停录线保证停的时候还有足够空间
+把编码器缓冲、最后一个分片和 moov 回填全部写完，不会写出截断文件。
+
+> 阈值按 `StatFs.availableBytes` 判断，是**整块共享存储**的剩余空间，不是本应用
+> 目录的占用——这样才符合「磁盘快满了」的真实语义。
+
+---
+
 ## 九、常改参数（`core/AppConfig.kt`）
 
 | 参数 | 说明 |
@@ -725,6 +768,9 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 | `photoSizeOptions()` | 四档拍照尺寸；设备不支持时按面积回退（见「六点八」） |
 | `BURST_INTERVAL_OPTIONS` / `BURST_COUNT_OPTIONS` | 连拍间隔（秒）与张数档位 |
 | `LIGHT_NODE_TORCH` / `LIGHT_NODE_IR` | 补光 / 红外灯的固定 sysfs 节点路径；留空表示该灯未接入（见「六点六」） |
+| `DISK_WARN_OPTIONS_MB` / `DEFAULT_DISK_WARN_MB` | 空间告警阈值的可选档位与默认值（默认 500MB） |
+| `DISK_STOP_DIVISOR` / `DISK_STOP_MIN_MB` | 强制停录线 = 告警阈值 ÷ 该除数，且不低于最小 MB（默认 ÷5、100MB）（见「八点十」） |
+| `DISK_CHECK_MS` | 录制期间的磁盘巡检间隔，默认 2000ms |
 
 画幅不写死：`R` 为 90/270 时输出 1080×1920，否则 1920×1080；
 相机流尺寸由 `CameraController.listCameras()` 从设备支持的 `SurfaceTexture` 尺寸里挑
@@ -760,7 +806,10 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 9. **录音也曾用传统 MP4**（已修复）：早期 `.m4a` 走 `MediaMuxer` 的传统 MP4，
    强杀时当前分段会报废。现在录音与录像共用 `Fmp4Segment`，同样是 fMP4，
    已写分片仍可播放；文件扩展名仍是 `.m4a`，主流播放器与相册均正常识别。
-10. **未做**：断点续录、加密存储、Wi-Fi 回传、GNSS 北斗原始数据。
+10. **循环录像只清理视频分段**：`DiskGuard` 删的是 `BodyCam/Video` 下的 `VID_*.mp4`，
+    照片、录音以及目录里其它来源的文件都不动。所以照片/录音堆积同样会占满磁盘，
+    那部分需要手动清理。
+11. **未做**：断点续录、加密存储、Wi-Fi 回传、GNSS 北斗原始数据。
 
 ---
 
