@@ -109,6 +109,22 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     /** 补光灯的相机通路；LightController 建好后注入，销毁时注销 */
     private val torchPath = TorchPath()
 
+    /**
+     * 连拍状态。连拍全部在主线程的 [uiHandler] 上排程，所以两个字段都只在
+     * 主线程读写；[burstRemaining] 归零即表示本次连拍结束。
+     */
+    private var burstRemaining = 0
+    private var burstSaved = 0
+
+    /** 已发出、尚未回调的拍照数；与 [burstSaved] 一起判断连拍是否全部落盘 */
+    private var burstIssued = 0
+
+    /** 连拍期间抑制单张 toast，改在结束时汇总一次 */
+    private var burstActive = false
+
+    /** 连拍定时任务；取消连拍或退出页面时移除 */
+    private var burstTick: Runnable? = null
+
     private var pipeline: GlPipeline? = null
     private var surfaceTexture: SurfaceTexture? = null
     private var cameraSurface: Surface? = null
@@ -225,7 +241,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
                     applyPreRecordSetting()
                     refreshTriggerReceiver()
                     updateDebugInfo()
-                    camera?.setPhotoFlashMode(SettingsStore.photoFlashMode(this@MainActivity))
+                    applyPhotoSettings()
                 }
             }
         }
@@ -311,6 +327,10 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
+        // 连拍排程挂在 uiHandler 上，已被上面一并清掉，这里只复位状态
+        burstActive = false
+        burstRemaining = 0
+        burstTick = null
         // 前摄模式下亮的是别的摄像头的 LED，退出页面必须手工关掉
         releaseLights()
         LightController.detachCameraTorch()
@@ -622,6 +642,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         if (recording || savingSegment) {
             return toast(getString(R.string.camera_switch_blocked))
         }
+        // 连拍跨摄像头没有意义：旧控制器的 capture 会在 close 后失效
+        cancelBurst()
         if (cameras.size <= 1) return
         val currentId = currentSpec?.cameraId
         val index = cameras.indexOfFirst { it.cameraId == currentId }
@@ -670,8 +692,12 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             onPhoto = { bytes -> savePhoto(bytes) },
             onError = { message -> runOnUiThread { toast(message) } }
         )
-        // 拍照补光策略来自设置，随控制器实例下发
+        // 拍照相关设置（补光 / 质量 / 尺寸）随控制器实例下发
         controller.setPhotoFlashMode(SettingsStore.photoFlashMode(this))
+        controller.setPhotoQuality(SettingsStore.photoQuality(this))
+        val (targetW, targetH) = AppConfig.photoSizeOptions()
+            .getOrElse(SettingsStore.photoSizeIndex(this)) { AppConfig.photoSizeOptions()[0] }
+        controller.setPhotoSize(spec.resolvePhotoSize(targetW, targetH))
         return controller
     }
 
@@ -811,6 +837,26 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     // ------------------------------------------------------------ 拍照
 
+    // ------------------------------------------------------------ 拍照
+
+    /**
+     * 把拍照相关设置下发给当前控制器。
+     *
+     * 质量与补光只改字段，下一次拍照即生效；尺寸要换 ImageReader 并重建会话，
+     * 所以**录像中跳过**（会话重建会让编码器拿不到连续帧），下次录像结束
+     * 或切摄像头时会重新下发。
+     */
+    private fun applyPhotoSettings() {
+        val cam = camera ?: return
+        cam.setPhotoFlashMode(SettingsStore.photoFlashMode(this))
+        cam.setPhotoQuality(SettingsStore.photoQuality(this))
+        if (!recording) {
+            val (w, h) = AppConfig.photoSizeOptions()
+                .getOrElse(SettingsStore.photoSizeIndex(this)) { AppConfig.photoSizeOptions()[0] }
+            cam.setPhotoSize(currentSpec?.resolvePhotoSize(w, h) ?: android.util.Size(w, h))
+        }
+    }
+
     private fun capturePhoto() {
         val cam = camera ?: return toast(getString(R.string.camera_not_ready))
         if (!StoragePermission.isGranted(this)) {
@@ -818,8 +864,116 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             StoragePermission.openSettings(this)
             return
         }
+        if (SettingsStore.photoMode(this) == AppConfig.PHOTO_MODE_BURST) {
+            startBurst(cam)
+        } else {
+            cam.takePhoto()
+            flashScreen()
+        }
+    }
+
+    // ------------------------------------------------------------ 连拍
+
+    /**
+     * 开始连拍：立刻拍第一张，之后每隔 N 秒再拍一张，共拍 N 张。
+     *
+     * 排程放在主线程：每张都走一次 [CameraController.takePhoto] 的**单次 capture**，
+     * 预览流与会话完全不动，所以既不阻塞预览，也不重建会话。
+     *
+     * 录像中不允许进入连拍：连拍每张都要往 JPEG 输出送一帧，与编码器抢带宽，
+     * 连续多张会让编码器偶发掉帧，这里按需求给的折中方案直接拦下。
+     */
+    private fun startBurst(cam: CameraController) {
+        if (recording) return toast(getString(R.string.photo_burst_blocked_recording))
+        if (burstActive) return  // 上一轮还没拍完，忽略重复触发
+
+        val total = SettingsStore.burstCount(this).coerceAtLeast(1)
+        val intervalMs = SettingsStore.burstIntervalSeconds(this).coerceAtLeast(1) * 1000L
+
+        burstActive = true
+
+        burstRemaining = total
+        burstSaved = 0
+        burstIssued = 0
+
+        // 第一张立即拍，后续按固定间隔排队（不叠加上一张的写盘耗时）
+        shootBurstFrame(cam, intervalMs)
+    }
+
+    /** 拍一张，然后按间隔预约下一张；拍满 total 张后收尾 */
+    private fun shootBurstFrame(cam: CameraController, intervalMs: Long) {
+        if (!burstActive) return
+        if (!cam.isReady) {
+            // 相机在连拍途中被系统掐断（息屏/被抢占）：中止，别让状态卡住
+            abortBurst()
+            return
+        }
+        burstRemaining--
+        burstIssued++
         cam.takePhoto()
         flashScreen()
+
+        if (burstRemaining <= 0) {
+            finishBurst()
+            return
+        }
+        val tick = Runnable { shootBurstFrame(cam, intervalMs) }
+        burstTick = tick
+        uiHandler.postDelayed(tick, intervalMs)
+    }
+
+    /**
+     * 拍够张数：停止排程，但要把**在途照片等全部写盘完成**再汇总。
+     * 每张的 savePhoto 异步跑在 photoExecutor 上，提前汇总会少算最后几张。
+     */
+    private fun finishBurst() {
+        cancelBurstTick()
+        burstRemaining = 0
+        settleBurst(cancelled = false)
+    }
+
+    /**
+     * 收尾：等所有已发出的照片回调完毕（成功或失败各算一次），再弹一次汇总。
+     * [burstActive] 全程保持 true，就是为了让 savePhoto 在等待期间不逐张弹提示。
+     */
+    private fun settleBurst(cancelled: Boolean) {
+        if (burstSaved < burstIssued) {
+            uiHandler.postDelayed({ settleBurst(cancelled) }, 100)
+            return
+        }
+        burstActive = false
+        if (cancelled) {
+            if (burstSaved > 0) toast(getString(R.string.photo_burst_cancelled))
+        } else {
+            toast(getString(R.string.photo_burst_done_fmt, burstSaved))
+        }
+        burstIssued = 0
+        burstSaved = 0
+
+    }
+
+    /** 取消进行中的连拍（退出页面、切换摄像头、开录时调用），已拍的照常保存 */
+    private fun cancelBurst() {
+        if (!burstActive) return
+        cancelBurstTick()
+        burstRemaining = 0
+        settleBurst(cancelled = true)
+    }
+
+    /** 相机不可用导致的中止：静默复位并提示重试 */
+    private fun abortBurst() {
+        cancelBurstTick()
+        burstActive = false
+        burstRemaining = 0
+        burstIssued = 0
+        burstSaved = 0
+
+        toast(getString(R.string.camera_not_ready))
+    }
+
+    private fun cancelBurstTick() {
+        burstTick?.let { uiHandler.removeCallbacks(it) }
+        burstTick = null
     }
 
     private fun savePhoto(bytes: ByteArray) {
@@ -828,18 +982,24 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         // 用「自动角度」而不是校准后的角度：JPEG_ORIENTATION 写的就是这个值，
         // 照片该转多少度由它决定，跟预览/录像的校准偏移无关。
         val rotation = autoRotationDeg
+        // 连拍时每张单独命名；毫秒时间戳保证不撞名（间隔最短 1 秒，远大于 1ms）
+        val name = "IMG_${Storage.stamp()}.jpg"
         photoExecutor.execute {
             // 照片链路单独用一个 painter 实例：WatermarkPainter 内部复用 Bitmap，不是线程安全的
             val stamped = runCatching {
                 PhotoWatermarker.watermark(bytes, WatermarkPainter(), data, rotation)
             }.getOrDefault(bytes)
-            val name = "IMG_${Storage.stamp()}.jpg"
             val saved = runCatching { Storage.savePhoto(this, stamped, name) }.getOrNull()
             runOnUiThread {
-                toast(
-                    if (saved != null) getString(R.string.photo_saved, saved)
-                    else getString(R.string.photo_failed)
-                )
+                if (saved != null) burstSaved++
+                // 连拍（含收尾等待期）不逐张弹提示，否则每秒一条把画面盖住；
+                // 汇总由 settleBurst 在全部落盘后统一弹一次
+                if (!burstActive) {
+                    toast(
+                        if (saved != null) getString(R.string.photo_saved, saved)
+                        else getString(R.string.photo_failed)
+                    )
+                }
             }
         }
     }
@@ -866,6 +1026,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         val p = pipeline ?: return toast(getString(R.string.camera_not_ready))
         val rec = recorder ?: return toast(getString(R.string.camera_not_ready))
         val cam = camera ?: return toast(getString(R.string.camera_not_ready))
+
+        // 连拍与录像互斥：连拍会连续往 JPEG 输出送帧，与编码器抢带宽
+        cancelBurst()
 
         // 若此前因息屏停掉了预览流，开录前必须先恢复，否则编码器拿不到帧
         cam.setStreaming(true)
@@ -962,6 +1125,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     /** 录制文件已收尾：提示结果并重新拉起预录缓存（在 UI 线程） */
     private fun onSegmentSaved(files: List<Storage.Entry>, micPeak: Int) {
         if (isDestroyed) return
+        // 录像期间被跳过的拍照尺寸切换，现在补上（会话重建放在停录之后才安全）
+        applyPhotoSettings()
         toast(
             if (files.isEmpty()) getString(R.string.video_failed)
             else getString(R.string.video_saved, files.size, files.last().displayName)

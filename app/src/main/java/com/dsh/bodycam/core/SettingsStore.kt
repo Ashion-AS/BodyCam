@@ -32,6 +32,11 @@ object SettingsStore {
     private const val KEY_DEBUG_OVERLAY = "debug_overlay"
     private const val KEY_CAMERA_ID = "camera_id"
     private const val KEY_PHOTO_FLASH = "photo_flash"
+    private const val KEY_PHOTO_MODE = "photo_mode"
+    private const val KEY_PHOTO_QUALITY = "photo_quality"
+    private const val KEY_PHOTO_SIZE_INDEX = "photo_size_index"
+    private const val KEY_BURST_INTERVAL = "burst_interval_seconds"
+    private const val KEY_BURST_COUNT = "burst_count"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
@@ -105,6 +110,56 @@ object SettingsStore {
 
     fun setPhotoFlashMode(context: Context, mode: Int) {
         prefs(context).edit().putInt(KEY_PHOTO_FLASH, mode).apply()
+        listener?.onSettingsChanged()
+    }
+
+    // ------------------------------------------------------------ 拍照
+
+    /** 拍照模式：见 [AppConfig.PHOTO_MODE_SINGLE] / [AppConfig.PHOTO_MODE_BURST] */
+    fun photoMode(context: Context): Int =
+        prefs(context).getInt(KEY_PHOTO_MODE, AppConfig.PHOTO_MODE_SINGLE)
+
+    fun setPhotoMode(context: Context, mode: Int) {
+        prefs(context).edit().putInt(KEY_PHOTO_MODE, mode).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 拍照质量：见 [AppConfig.PHOTO_QUALITY_HIGH] / MEDIUM / LOW */
+    fun photoQuality(context: Context): Int =
+        prefs(context).getInt(KEY_PHOTO_QUALITY, AppConfig.PHOTO_QUALITY_HIGH)
+
+    fun setPhotoQuality(context: Context, quality: Int) {
+        prefs(context).edit().putInt(KEY_PHOTO_QUALITY, quality).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /**
+     * 拍照尺寸档位下标（[AppConfig.photoSizeOptions] 的下标）。
+     * 存下标而不是像素：换机器后由相机层回退到最接近的可用档。
+     */
+    fun photoSizeIndex(context: Context): Int =
+        prefs(context).getInt(KEY_PHOTO_SIZE_INDEX, AppConfig.PHOTO_SIZE_DEFAULT_INDEX)
+
+    fun setPhotoSizeIndex(context: Context, index: Int) {
+        prefs(context).edit().putInt(KEY_PHOTO_SIZE_INDEX, index).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 连拍间隔（秒） */
+    fun burstIntervalSeconds(context: Context): Int =
+        prefs(context).getInt(KEY_BURST_INTERVAL, AppConfig.DEFAULT_BURST_INTERVAL_SECONDS)
+
+    fun setBurstIntervalSeconds(context: Context, seconds: Int) {
+        prefs(context).edit().putInt(KEY_BURST_INTERVAL, seconds).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 连拍张数 */
+    fun burstCount(context: Context): Int =
+        prefs(context).getInt(KEY_BURST_COUNT, AppConfig.DEFAULT_BURST_COUNT)
+
+    fun setBurstCount(context: Context, count: Int) {
+        prefs(context).edit().putInt(KEY_BURST_COUNT, count).apply()
         listener?.onSettingsChanged()
     }
 

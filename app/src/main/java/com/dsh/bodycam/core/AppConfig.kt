@@ -40,6 +40,50 @@ object AppConfig {
     const val PHOTO_FLASH_AUTO = 1
     const val PHOTO_FLASH_ALWAYS = 2
 
+    // ------------------------------------------------------------ 拍照
+
+    /** 单拍：按一次拍一张 */
+    const val PHOTO_MODE_SINGLE = 0
+
+    /** 连拍：按一次连续拍 N 张（间隔与张数见设置页） */
+    const val PHOTO_MODE_BURST = 1
+
+    /** JPEG 质量档位，对应三种压缩质量 */
+    const val PHOTO_QUALITY_HIGH = 0
+    const val PHOTO_QUALITY_MEDIUM = 1
+    const val PHOTO_QUALITY_LOW = 2
+
+    /** 各档对应的 `JPEG_QUALITY` 值 */
+    fun jpegQuality(quality: Int): Int = when (quality) {
+        PHOTO_QUALITY_MEDIUM -> 80
+        PHOTO_QUALITY_LOW -> 65
+        else -> 95
+    }
+
+    /**
+     * 可选拍照尺寸（长边 × 短边）。设备不支持时由 [com.dsh.bodycam.camera.CameraController]
+     * 回退到面积最接近的可用档。
+     *
+     * 只列 16:9 的四档，与视频同比例——照片与预览构图一致，不会出现
+     * 「预览看到的比拍下来的窄」。
+     */
+    fun photoSizeOptions(): List<Pair<Int, Int>> = listOf(
+        1280 to 720,
+        1920 to 1080,
+        2560 to 1440,
+        3840 to 2160
+    )
+
+    /** 尺寸档位下标；持久化的是下标，不是像素，设备换机后仍能落到合理档位 */
+    const val PHOTO_SIZE_DEFAULT_INDEX = 1
+
+    /** 连拍间隔（毫秒）与张数的可选档位 */
+    val BURST_INTERVAL_OPTIONS = intArrayOf(1, 2, 3, 5)
+    val BURST_COUNT_OPTIONS = intArrayOf(3, 5, 10, 20)
+
+    const val DEFAULT_BURST_INTERVAL_SECONDS = 1
+    const val DEFAULT_BURST_COUNT = 3
+
     /**
      * 固定节点的灯光通路（sysfs）。
      *

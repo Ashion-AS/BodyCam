@@ -40,9 +40,30 @@ data class CameraSpec(
     /** 传感器有效像素区域，缩放裁剪以它为中心 */
     val activeArray: Rect = Rect(),
     /** 最大数字变焦倍率；1 表示该摄像头不支持缩放（缩放条应隐藏） */
-    val zoomMax: Float = 1f
+    val zoomMax: Float = 1f,
+    /** 该摄像头支持的全部 JPEG 输出尺寸，用于按设置档位挑选/回退 */
+    val jpegSizes: List<Size> = emptyList()
 ) {
     val isFront: Boolean get() = lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+
+    /**
+     * 按设置档位的目标像素挑一个实际可用的 JPEG 尺寸。
+     *
+     * 相机只支持固定的几档，设置页给的档位不一定都有。规则：
+     *  1. 精确命中就用它；
+     *  2. 否则在同一宽高比（16:9）里取面积最接近的；
+     *  3. 再否则在全量列表里取面积最接近的。
+     * 都没有（例如探测失败）退回探测时选好的 [photoSize]。
+     */
+    fun resolvePhotoSize(targetW: Int, targetH: Int): Size {
+        if (jpegSizes.isEmpty()) return photoSize
+        val targetArea = targetW.toLong() * targetH
+        jpegSizes.firstOrNull { it.width == targetW && it.height == targetH }?.let { return it }
+        val sameRatio = jpegSizes.filter { it.width * targetH == it.height * targetW }
+        val pool = sameRatio.ifEmpty { jpegSizes }
+        return pool.minByOrNull { kotlin.math.abs(it.width.toLong() * it.height - targetArea) }
+            ?: photoSize
+    }
 
     /**
      * 按倍率算中心裁剪区域：裁得越小，画面放大越多。
@@ -101,6 +122,14 @@ class CameraController(
     @Volatile
     private var photoFlashMode = AppConfig.PHOTO_FLASH_OFF
 
+    /** JPEG 压缩质量，来自设置页的质量档位 */
+    @Volatile
+    private var jpegQuality = AppConfig.jpegQuality(AppConfig.PHOTO_QUALITY_HIGH)
+
+    /** 当前实际使用的拍照尺寸；默认用探测时选好的，切档位时替换 */
+    @Volatile
+    private var photoSize: Size = spec.photoSize
+
     /** 防止 open() 与 ensureOpen() 在相机真正打开前重复调用 openCamera */
     @Volatile
     private var opening = false
@@ -138,11 +167,7 @@ class CameraController(
         }
 
         if (imageReader == null) {
-            imageReader = ImageReader.newInstance(
-                spec.photoSize.width, spec.photoSize.height, ImageFormat.JPEG, 2
-            ).apply {
-                setOnImageAvailableListener({ reader -> handleJpeg(reader) }, handler)
-            }
+            imageReader = createReader(photoSize)
         }
 
         try {
@@ -184,6 +209,15 @@ class CameraController(
             onError("打开相机失败：${e.message}")
         }
     }
+
+    /**
+     * 建 JPEG 输出。缓冲数取 4：连拍时间隔最短 1 秒，但如果上一张的
+     * decode + 重编码还在排队，2 个缓冲会让第 3 张直接丢帧。
+     */
+    private fun createReader(size: Size): ImageReader =
+        ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 4).apply {
+            setOnImageAvailableListener({ reader -> handleJpeg(reader) }, handler)
+        }
 
     private fun createSession(camera: CameraDevice) {
         // 会话代次：startStreaming 是异步回调，若期间 restartPreview/setStreaming
@@ -305,6 +339,56 @@ class CameraController(
         photoFlashMode = mode
     }
 
+    /** JPEG 质量档位：见 [AppConfig.PHOTO_QUALITY_HIGH] / MEDIUM / LOW */
+    fun setPhotoQuality(quality: Int) {
+        jpegQuality = AppConfig.jpegQuality(quality)
+    }
+
+    /** 当前实际使用的拍照尺寸（已按设备能力回退过） */
+    val currentPhotoSize: Size get() = photoSize
+
+    /**
+     * 切换拍照尺寸。
+     *
+     * ImageReader 的尺寸在创建时固定，换尺寸只能换一个 reader；而 reader 是
+     * CaptureSession 的输出目标之一，所以必须关会话 → 换 reader → 重建会话。
+     * 预览流（[targetSurface]）不动，画面不会黑。
+     *
+     * **录像中不要调用**：会话重建会让编码器拿不到连续帧。是否允许切换由上层
+     * （[com.dsh.bodycam.MainActivity]）按录像状态判断，控制器不做拦截。
+     *
+     * @return true = 已排入切换队列（或本来就是目标尺寸）
+     */
+    fun setPhotoSize(size: Size): Boolean {
+        if (released.get()) return false
+        if (size == photoSize && imageReader != null) return true
+        photoSize = size
+        handler.post {
+            if (released.get()) return@post
+            val camera = device ?: return@post
+            // 换 reader：先放掉旧的，再按新尺寸建一个新的
+            try {
+                session?.stopRepeating()
+            } catch (_: Exception) {
+            }
+            try {
+                session?.close()
+            } catch (_: Exception) {
+            }
+            session = null
+            streaming = false
+            sessionGen++
+            try {
+                imageReader?.close()
+            } catch (_: Exception) {
+            }
+            imageReader = createReader(size)
+            Log.i(TAG, "photo size -> ${size.width}x${size.height}")
+            createSession(camera)
+        }
+        return true
+    }
+
     /** 该摄像头的最大变焦倍率；<= 1 表示不支持缩放 */
     val zoomMax: Float get() = spec.zoomMax
 
@@ -372,7 +456,7 @@ class CameraController(
                     CaptureRequest.CONTROL_AF_MODE,
                     CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE
                 )
-                builder.set(CaptureRequest.JPEG_QUALITY, 95.toByte())
+                builder.set(CaptureRequest.JPEG_QUALITY, jpegQuality.toByte())
                 builder.set(CaptureRequest.JPEG_ORIENTATION, orientationHint())
                 // 照片与预览保持同一视野：缩放后拍照也裁到同样区域
                 applyZoom(builder)
@@ -418,8 +502,11 @@ class CameraController(
     }
 
     private fun handleJpeg(reader: ImageReader) {
+        // 用 acquireNextImage 而不是 acquireLatestImage：连拍时多张 JPEG 会同时
+        // 排在 reader 队列里，取 latest 会把中间几张直接丢弃。
+        // maxImages=2 保证队列不会无界增长，回调本身是串行投递到 handler 的。
         val image = try {
-            reader.acquireLatestImage()
+            reader.acquireNextImage()
         } catch (e: Exception) {
             null
         } ?: return
@@ -536,7 +623,8 @@ class CameraController(
                         ?: false,
                     activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                         ?: Rect(),
-                    zoomMax = zoomMax
+                    zoomMax = zoomMax,
+                    jpegSizes = jpegSizes.toList()
                 )
             } catch (e: Exception) {
                 null

@@ -2,10 +2,9 @@
 <resources>
     <string name="title_settings">设置</string>
     <string name="settings_pre_record_title">预录功能</string>
-    <string name="settings_pre_record_summary">开始录像前持续缓存画面，停录后一起保存</string>
+    <string name="settings_pre_record_summary">开始录像前持续缓存画面与声音；开启后耗电与内存占用会增加</string>
     <string name="settings_pre_record_duration_title">预录时长</string>
     <string name="settings_pre_record_duration_fmt">%1$d 秒</string>
-    <string name="settings_pre_record_hint">预录同时缓存画面与声音；开启后耗电与内存占用会增加。</string>
 
     <string name="settings_storage_title">文件存储权限</string>
     <string name="settings_storage_granted">已开启，录像/照片/录音会保存到 BodyCam 目录</string>
@@ -21,4 +20,30 @@
     <string name="settings_photo_flash_off">关闭</string>
     <string name="settings_photo_flash_auto">自动</string>
     <string name="settings_photo_flash_always">强制</string>
+
+    <string name="settings_photo_mode_title">拍照模式</string>
+    <string name="settings_photo_mode_single">单拍</string>
+    <string name="settings_photo_mode_burst">连拍</string>
+    <string name="settings_photo_mode_summary_single">按一次快门拍一张</string>
+    <string name="settings_photo_mode_summary_burst">按一次快门连续拍多张，每张单独保存</string>
+
+    <string name="settings_photo_quality_title">拍照质量</string>
+    <string name="settings_photo_quality_high">高</string>
+    <string name="settings_photo_quality_medium">中</string>
+    <string name="settings_photo_quality_low">低</string>
+    <string name="settings_photo_quality_summary">质量越高文件越大，单张写盘也越慢</string>
+
+    <string name="settings_photo_size_title">拍照尺寸</string>
+    <string name="settings_photo_size_px_fmt">%1$d×%2$d（%3$dM）</string>
+    <string name="settings_photo_size_summary">设备不支持时会自动回退到最接近的可用档；与视频同为 16:9，构图一致</string>
+
+    <string name="settings_burst_interval_title">拍照间隔</string>
+    <string name="settings_burst_interval_fmt">%1$d 秒</string>
+    <string name="settings_burst_count_title">连拍数目</string>
+    <string name="settings_burst_count_fmt">%1$d 张</string>
+    <string name="settings_burst_summary">间隔越短、张数越多，连拍总时长越长；连拍期间屏幕保持预览</string>
+
+    <string name="photo_burst_done_fmt">已保存 %1$d 张</string>
+    <string name="photo_burst_blocked_recording">录像中不进入连拍，请先停止录像</string>
+    <string name="photo_burst_cancelled">连拍已取消</string>
 </resources>

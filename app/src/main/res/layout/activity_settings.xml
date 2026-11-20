@@ -6,12 +6,10 @@
     顶栏  返回 + 标题，1dp 分隔线
     行 1  预录开关（标题 + 一句说明 + 开关）
     行 2  预录时长（分段选项，关闭预录时整行降到 40% 不透明度且不可点）
-    页脚  一行说明
 
   行与行之间共用 1dp 分隔线，行本身是 paper_2；不叠卡片、不加投影。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/paper"
@@ -233,15 +231,145 @@
                     android:text="@string/settings_photo_flash_summary" />
             </LinearLayout>
 
-            <!-- 页脚：代价说清楚，不藏 -->
-            <TextView
-                style="@style/BodyCamHint"
+            <!-- 行 6：拍照模式（单拍 / 连拍） -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="@dimen/space_md"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:text="@string/settings_pre_record_hint"
-                tools:ignore="RtlSymmetry" />
-        </LinearLayout>
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_photo_mode_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgPhotoMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    android:id="@+id/photoModeSummary"
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs" />
+            </LinearLayout>
+
+            <!-- 行 7：连拍间隔与张数（仅连拍模式显示） -->
+            <LinearLayout
+                android:id="@+id/burstSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_burst_interval_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgBurstInterval"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_md"
+                    android:text="@string/settings_burst_count_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgBurstCount"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_burst_summary" />
+            </LinearLayout>
+
+            <!-- 行 8：拍照质量 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_photo_quality_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgPhotoQuality"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_photo_quality_summary" />
+            </LinearLayout>
+
+            <!-- 行 9：拍照尺寸 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_photo_size_title" />
+
+                <!--
+                   拍照尺寸：四档标签较长，一行两个、两行排布，
+                   每格等宽，避免挤在一行时被压扁变形。
+                -->
+                <LinearLayout
+                    android:id="@+id/llPhotoSize"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="vertical" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_photo_size_summary" />
+            </LinearLayout>
+
+            </LinearLayout>
     </ScrollView>
 </LinearLayout>
