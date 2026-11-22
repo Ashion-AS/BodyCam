@@ -91,6 +91,40 @@
             app:show_buffering="when_playing"
             app:show_timeout="0"
             app:use_controller="true" />
+
+        <!--
+          加载遮罩：大文件（30 分钟量级）进入播放页时要先扫一遍索引
+          （MuxerFix 补 mfra + ExoPlayer prepare 建 SeekMap），这期间控制条
+          全是灰的、画面黑着，看起来像卡死。这一层盖上去告诉用户「在加载」。
+
+          只在视频/音频时出现，`STATE_READY` 或出错时由代码移除。遮罩本身声明为
+          可点，加载期间把误触吃掉，避免用户点到还没就绪的控制条。
+        -->
+        <LinearLayout
+            android:id="@+id/loadingOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/paper_3"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <ProgressBar
+                android:layout_width="@dimen/loading_size"
+                android:layout_height="@dimen/loading_size"
+                android:indeterminate="true"
+                android:indeterminateTint="@color/accent" />
+
+            <TextView
+                style="@style/BodyCamHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/space_md"
+                android:text="@string/viewer_loading"
+                android:textSize="@dimen/text_md" />
+        </LinearLayout>
     </FrameLayout>
 
 </LinearLayout>

@@ -45,7 +45,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 录音 30 分钟自动分段 | `AudioRecorder`：编码器不停，只在分段点换新的 fMP4 封装器 |
 | 文件管理（图片 / 视频 / 音频） | `FilesActivity`：三个 tab 分别列出 `BodyCam/{Image,Video,Audio}` 下的文件，最新在最上；点击进入 `ViewerActivity` 看图 / 播视频 / 播音频 |
 | 强杀/掉电后文件仍可播放 | 录像与录音都写 **fMP4**（media3 `FragmentedMp4Muxer`），最多丢最后一个分片（2 秒） |
-| 录音/视频在 App 内可正常播放 | `util/MuxerFix` 收尾时回填 moov 的 duration 并修正音频同步样本位（见「八点八」「八点九」） |
+| 录音/视频在 App 内可正常播放 | `util/MuxerFix` 收尾时回填 moov 的 duration、修正音频同步样本位、注入 tfdt、追写 mfra 索引（见「八点八」「八点九」「八点九之二」「八点九之三」） |
 
 ---
 
@@ -117,7 +117,7 @@ app/src/main/
 │   ├── core/SettingsStore.kt        # 预录设置 + 触发键/广播配置读写 + 变更回调
 │   ├── core/AppConfig.kt            # 所有可调参数集中在这里
 │   ├── util/Rotation.kt             # Surface 旋转常量 → 角度
-│   ├── util/MuxerFix.kt             # 回填 fMP4 的 duration、修正音频同步样本位（media3 muxer 的两个补丁）
+│   ├── util/MuxerFix.kt             # 回填 fMP4 的 duration、修正音频同步样本位、注入 tfdt、追写 mfra 索引（media3 muxer 的四个补丁）
 │   ├── util/DiskGuard.kt            # 剩余空间检查 + 循环录像清理（只删 BodyCam/Video 下的 VID_ 分段）
 │   └── util/Storage.kt              # 文件落盘 + 文件页的目录枚举（list）
 └── res/                             # 布局（主界面/设置页/文件页/查看页）、主题、图标、无障碍配置
@@ -635,8 +635,9 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
 
 > 为什么不用系统 `VideoView` / `MediaPlayer`：成片是 fMP4（moof+mdat 分片、moov 无
 > 样本索引），系统 MediaPlayer 拖动进度条 seek 会报 `MEDIA_ERROR_UNKNOWN`
-> （`Error (-2147483648,0)`）。media3 的 `FragmentedMp4Extractor` 会为分片建立样本
-> 索引，seek 正常。
+> （`Error (-2147483648,0)`）。media3 的 `FragmentedMp4Extractor` 能解析分片，
+> 但**同样需要索引才可 seek**——muxer 不写索引，由 `MuxerFix` 补写 `mfra`
+> （见「八点九之二」），补上之后进度条才可拖。
 
 `Storage.list()` 提供这套枚举，权限判断同样走 `StoragePermission`，
 与落盘链路共用同一份目录约定，不另起一套。
@@ -708,6 +709,155 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 验证：音轨样本 flags 由 `0x1010000` 变为 `0x2000000`；App 内播放时
 `dumpsys media.audio_flinger` 出现 `1 Tracks of which 1 are active`，
 `G db=0`、`Underruns=0`。
+
+## 八点九之二、进度条拖不动的修复（fMP4 的 mfra 索引）
+
+**现象**：录像和录音在 App 内播放，进度条是**灰色不可拖**的状态；时长显示正常
+（如 `00:21 · 29:59`），也能量到结尾。
+
+**根因**：时长正常说明 duration 回填已经生效，但能不能拖取决于 **`SeekMap` 是否
+可寻址**，两者是独立的。`FragmentedMp4Extractor` 读到第一个 `moof` 时若没有索引，
+就把 `SeekMap` 定成 `Unseekable` 并**永不更新**。media3 的 `FragmentedMp4Muxer`
+只写 `ftyp / moov / moof+mdat`，**不写任何索引**（既无 `sidx` 也无 `mfra`）。
+30 分钟录音是 900 个 2 秒分片，拖进度条只能从头顺序解。
+
+因果链完整核对过：
+
+```
+SeekMap.isSeekable() == false
+  → ProgressiveMediaSource 里 timelineIsSeekable = false
+  → Timeline.Window.isSeekable = false
+  → COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM 不可用
+  → PlayerControlView: timeBar.setEnabled(false)   ← 截图里灰掉的进度条
+```
+
+**修复**：`MuxerFix.patchMfra()` 在文件末尾追写标准 `mfra` 索引盒
+（每个 `traf` 一条「时间 → moof 偏移」）。`patchDurations()` 现在依次做三件事：
+
+```
+patchSampleSyncFlags()  → 清音频非同步位（八点九）
+patchMfra()              → 追写 mfra 随机访问索引（本节）
+回填 mvhd/tkhd/mdhd duration（八点八）
+```
+
+`mfra` 在文件最后，追加写出不改动任何既有偏移，重复调用幂等。
+
+三个**必须踩对的细节**（都写错过，都已修正）：
+
+1. **条目长度是 11 字节**，不是 16。`time(4) + moof_offset(4) + traf_number(1) +
+   trun_number(1) + sample_number(1)`，规范里没有第 4 个保留字节。多写一字节会让
+   `tfra` 的 `size` 比实际内容大，media3 的 `readMfra` 校验
+   `actualBoxSize > limit - boxStart` 时直接 `break`，索引整段被丢弃；
+   `mfro.mfra_size` 随之偏大，`readMfro` 定位到的位置根本不是 `mfra`——退回 `Unseekable`。
+2. **`tfra.time` 用 track 的 `mdhd.timescale` 单位**，不是微秒。media3 解析时会做
+   `Util.scaleLargeTimestamp(time, MICROS_PER_SECOND, timescale)` 再缩放一次；
+   写微秒会让所有索引时间失真。
+3. **不能依赖 `tfdt` —— media3 的 muxer 根本不写它**。这一点在真机上才暴露：
+   拉下 34 个 `moof` 逐个检查，**一个 `tfdt` 都没有**，`trex` 的
+   `default_sample_duration` 也恒为 0，样本时长只逐条记在 `trun` 里。
+   第一版实现按 `tfdt` 取时间、取不到就 `return null`，结果 34 个分片一条索引都没
+   收集到，`patchMfra()` 空跑 return，文件字节数一个没变——**修复代码装了却完全没生效**。
+   正确做法与 media3 自己在无 `tfdt` 时的行为一致：按 `trun` 里的样本时长
+   **逐片累加**推算每片首样本的解码时间（`decodeTicks` map 跨 moof 传递）；
+   万一将来文件带了 `tfdt` 则优先采信。`trun` 若既无逐样本时长也无
+   `tfhd.default_sample_duration`，退化为「时间不推进」——索引仍可用于定位，
+   只是时间轴会偏，此时打一条 warn。
+
+**对历史文件的处理**：早期版本写出的坏索引会被自动识别并重建——
+`isMfraUsable()` 校验「`mfra` 是最后一个盒 + 末尾 16 字节是 `mfro` +
+`mfra_size` 与实际长度一致」，任一不符就截断到媒体数据末尾（`scanBoxes()` 遇到
+`mfra` 即停，`mediaEnd` 恒为索引区之前的边界）再重写。因此打开老文件第一次播放
+即被就地修好，无需重新录制。
+
+**验证**（media3 1.11.1 源码逐行对照 + 真机实测）：
+
+- 字节级：按 media3 的 `readMfro` / `readMfra` 移植一份解析器做互验——新格式能被
+  正确解析出 `timesUs` / `offsets` 且 seek 落点正确，旧的 12 字节布局则被拒绝
+  （`no tfra parsed`）。
+- 真机（Pixel 4 XL / Android 13，实录 125MB / 34 分片）：
+
+| 检查项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 视频文件 `mfra` | 无，125778263 字节 | 有，125779083 字节（+820，68 条索引） |
+| 视频 `exo_progress.enabled` | `false`（灰） | `true` |
+| 视频 seek | 拖不动 | 拖到片头 `00:02`（水印 `15:17:58`）、拖到中部 `00:42`（水印 `15:19:17`），与文件内对应帧吻合 |
+| 音频文件 `mfra` | 无 | 有，32 条索引 |
+| 音频 seek | 拖不动 | 从 `01:04` 拖到 `00:34`，滑块随动 |
+
+轮询 `uiautomator dump` 读 `exo_progress` 的 `content-desc` 会滞后几秒，不可作为
+跳转判据；以截图里的进度时间 + 画面水印时间为准。
+
+> **易踩的排查坑**：修复代码改完后必须先 `assembleDebug` + `install -r` 装到机器上
+> 再验证。本轮第一次上机复现时设备里装的还是改动前的 APK（`MuxerFix.kt` 的改动只
+> 在工作区），表现为「改了还是拖不动」，白排查了一轮。
+
+---
+
+## 八点九之三、拖过去画面冻住的修复（fMP4 的 tfdt）
+
+**现象**：进度条已经能拖了（八点九之二生效），但拖到 1:30 松手后，**画面停在
+视频最后一帧不动，进度条却照常往前走**，声音正常。
+
+**为什么补了 mfra 还不够**：`mfra` 只解决「跳去哪个字节」，不解决「跳过去之后
+时间从哪算」。`FragmentedMp4Extractor.seek()` 会调 `resetFragmentInfo()`，
+最终走到 `TrackFragment.reset()`：
+
+```java
+public void reset() {
+  trunCount = 0;
+  nextFragmentDecodeTime = 0;          // ← 跨分片累加的基准被清零
+  nextFragmentDecodeTimeIncludesMoov = false;
+  ...
+}
+```
+
+分片里**没有 `tfdt`** 时，`parseTraf` 只能沿用这个 0 当基准，样本 PTS 从 0
+重新数；而播放位置还在 88.5s，渲染器判定每一帧都迟到，**整段丢弃**，直到最后
+一帧才追上——画面就冻住了。有 `tfdt` 时同一处代码会用盒里的绝对值覆盖基准：
+
+```java
+if (tfdtAtom != null && (flags & FLAG_WORKAROUND_IGNORE_TFDT_BOX) == 0) {
+  fragment.nextFragmentDecodeTime = parseTfdt(tfdtAtom.data);   // 从分片真实时间恢复
+  fragment.nextFragmentDecodeTimeIncludesMoov = true;
+}
+```
+
+而 media3 的 `FragmentedMp4Muxer` **完全不写 `tfdt`**（整个 muxer 源码里
+`grep tfdt` 零命中）。
+
+**修复**：`MuxerFix.patchTfdt()` 给每个 `traf` 在 `tfhd` 之后插入 16 字节的
+`tfdt`。因为插入会改变文件长度，必须**顺序重写整个文件**：
+
+- 每遇到 `moof` 就重建：插入 `tfdt`、重算 `traf`/`moof` 的 `size` 字段、
+  把后续 `tfhd.base_data_offset`（存的是绝对文件偏移）按已插入字节数前移；
+- `mdat` 与 `moov` 原样搬运，写出到 `*.tfdt` 临时文件后原子替换；
+- 原文件尾部的 `mfra` 偏移已全部失效，重写时丢弃，由 `patchMfra()` 按新偏移重建。
+
+因此 `patchDurations()` 的调用顺序**必须**是 tfdt 在前、mfra 在后：
+
+```
+patchSampleSyncFlags()  → 清音频非同步位（八点九）
+patchTfdt()              → 注入 tfdt，修正分片解码时间基准（本节）
+patchMfra()              → 按新偏移追写 mfra 随机访问索引（八点九之二）
+回填 mvhd/tkhd/mdhd duration（八点八）
+```
+
+插入时间的算法与 media3 无 `tfdt` 时的推算一致：按 `trun` 逐样本时长跨分片
+累加（`decodeTicks` map）。已有 `tfdt` 的分片直接采信盒里的值，所以**幂等**——
+二次打开不会重复插入。
+
+**验证**（真机 Pixel 4 XL / Android 13，实录 201MB / 56 分片 / 2 轨）：
+
+| 检查项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 文件里 `tfdt` 数量 | 0 | 112（56 分片 × 2 轨） |
+| 文件字节数 | 210929816 | 210931608（+1792 = 112 × 16） |
+| 拖到 1:30 后的画面 | 冻在最后一帧 | 正常播放，进度 `01:36` / 水印 `15:43:30`，与片内时间吻合 |
+
+> **另一处易踩的坑**：`markdown` 里的「文件被 Android Studio 内存映射占用」——
+> 用 `Edit`/`cp` 改 `MuxerFix.kt` 时若 IDE 正打开该文件，Windows 会报
+> `请求的操作无法在使用用户映射区域打开的文件上执行`。先把文件 `mv` 到别处再写回
+> 即可绕开。
 
 ---
 

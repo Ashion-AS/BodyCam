@@ -12,6 +12,9 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp4.FragmentedMp4Extractor
 import androidx.media3.ui.PlayerView
 import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.ui.ZoomableImageView
@@ -49,6 +52,7 @@ class ViewerActivity : Activity() {
     private lateinit var imageView: ZoomableImageView
     private lateinit var playerView: PlayerView
     private lateinit var audioIcon: ImageView
+    private lateinit var loadingOverlay: android.view.View
 
     private var player: ExoPlayer? = null
 
@@ -60,8 +64,10 @@ class ViewerActivity : Activity() {
         imageView = findViewById(R.id.imageView)
         playerView = findViewById(R.id.playerView)
         audioIcon = findViewById(R.id.audioIcon)
+        loadingOverlay = findViewById(R.id.loadingOverlay)
 
         findViewById<TextView>(R.id.btnBack).setOnClickListener { finish() }
+        padControlRows()
 
         val path = intent.getStringExtra(EXTRA_PATH)
         val kind = runCatching {
@@ -150,13 +156,30 @@ class ViewerActivity : Activity() {
             // 控制条本身不受影响，播放/暂停、进度、时间照常可用
             playerView.setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
         }
+        loadingOverlay.visibility = View.VISIBLE
 
-        val exo = ExoPlayer.Builder(this).build()
+        val exo = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(
+                DefaultMediaSourceFactory(
+                    this,
+                    DefaultExtractorsFactory().setFragmentedMp4ExtractorFlags(
+                        FragmentedMp4Extractor.FLAG_READ_MFRA_FOR_SEEK_MAP
+                    )
+                )
+            )
+            .build()
         player = exo
         playerView.player = exo
 
         exo.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // STATE_READY 才代表 moov/mfra 读完、SeekMap 建好、控制条可以放开拖；
+                // BUFFERING 期间（含首帧未解码）继续盖着，避免用户拖到未就绪的条上
+                if (playbackState == Player.STATE_READY) hideLoading()
+            }
+
             override fun onPlayerError(error: PlaybackException) {
+                hideLoading()
                 toast(getString(R.string.viewer_play_failed) + " (" + error.errorCodeName + ")")
             }
         })
@@ -178,6 +201,55 @@ class ViewerActivity : Activity() {
     }
 
     // ------------------------------------------------------------ 工具
+
+    /**
+     * 给播放控制条底部那一排的进度条与时长文本留出水平间隙。
+     *
+     * 两个节点都住在 `PlayerControlView` 内部的 `exo_player_control_view.xml`：
+     *
+     * - `exo_progress`（`DefaultTimeBar`）：**绘制范围与触摸热区都取自 `seekBounds`**，
+     *   而 `seekBounds` 的左右边界正是 `getPaddingLeft/Right()`（`DefaultTimeBar.onLayout`），
+     *   所以设水平 padding 能同时把「进度条两端」和「可拖拽热区」一并向内收。
+     * - `exo_time`（左侧「当前 / 总时长」）：XML 里自带 10dp 侧边距，这里统一成同档。
+     *
+     * 不加 `exo_basic_controls`（右下按钮组，含齿轮）：按钮自身带内边距，
+     * 再套一层会显得离屏幕沿太远，右侧按钮组保持原样。
+     *
+     * 不这么做的话，进度条会从屏幕最左画到最右，拖到片头/片尾时手指要压到
+     * 屏幕边缘，容易触发系统返回手势或被导航条吃掉。
+     *
+     * 取 `space_sm`（12dp）而不是更宽的档位：进度条本身还要再让出半个拖拽圆点
+     * （`scrubberPadding` 7.5dp），实际视觉端点约为 19dp，再宽就明显浪费横向长度了。
+     */
+    private fun padControlRows() {
+        val gap = resources.getDimensionPixelSize(R.dimen.space_sm)
+        val ids = intArrayOf(
+            androidx.media3.ui.R.id.exo_progress,
+            androidx.media3.ui.R.id.exo_time
+        )
+        for (id in ids) {
+            val v = playerView.findViewById<View?>(id) ?: continue
+            v.setPadding(gap, v.paddingTop, gap, v.paddingBottom)
+        }
+    }
+
+    /**
+     * 撤掉加载遮罩。幂等：重复调用只是多设一次 visibility。
+     *
+     * 不直接 `setVisibility(GONE)` 而是带一层淡出，因为大文件在 `STATE_READY`
+     * 边缘上常常还差一帧——硬切会让黑底和首帧闪一下。
+     */
+    private fun hideLoading() {
+        if (loadingOverlay.visibility != View.VISIBLE) return
+        loadingOverlay.animate()
+            .alpha(0f)
+            .setDuration(150L)
+            .withEndAction {
+                loadingOverlay.visibility = View.GONE
+                loadingOverlay.alpha = 1f
+            }
+            .start()
+    }
 
     private fun toast(message: String) {
         ToastBar.show(this, message)
