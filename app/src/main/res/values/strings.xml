@@ -56,12 +56,12 @@
     <string name="btn_audio_start">开始录音</string>
     <string name="btn_audio_stop">停止录音</string>
     <string name="audio_status_ready">就绪 · 等待录音</string>
-    <string name="audio_status_recording">正在录音…</string>
     <string name="audio_need_permission">需要录音权限才能录音</string>
     <string name="audio_start_failed">录音启动失败</string>
     <string name="audio_saved">录音已保存：%1$s</string>
     <string name="audio_saved_segments">录音已保存 %1$d 个文件，最后一个：%2$s</string>
     <string name="audio_failed">录音保存失败（可能没有录到声音）</string>
+    <string name="audio_mic_lost">麦克风采集已中断，正在保存已录内容</string>
     <string name="audio_silent_simple">注意：本次录音几乎没有声音</string>
 
     <!-- 文件管理页 -->

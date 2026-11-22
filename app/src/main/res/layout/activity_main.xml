@@ -66,20 +66,21 @@
                     android:textSize="@dimen/text_readout" />
 
                 <!--
-                  第二行：不录像时显示录像图标，录像时换成红色计时。
-                  两个控件叠在同一个 FrameLayout 里，计时保持 INVISIBLE 占位，
-                  这样这行的高度恒定，录制开始/结束时顶栏不会跳动。
+                  第二行：录像图标常驻，录像时在它右侧接上红色计时。
+                  计时在未录像时保持 INVISIBLE 占位，这样这行的宽高都恒定，
+                  录制开始/结束时顶栏不会跳动。
                 -->
-                <FrameLayout
+                <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_3xs">
+                    android:layout_marginTop="@dimen/space_3xs"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
                     <ImageView
                         android:id="@+id/iconRecordStatus"
                         android:layout_width="@dimen/status_icon"
                         android:layout_height="@dimen/status_icon"
-                        android:layout_gravity="start|center_vertical"
                         android:importantForAccessibility="no"
                         android:src="@drawable/ic_record"
                         android:tint="@color/ink" />
@@ -89,9 +90,10 @@
                         style="@style/BodyCamInstrumentLargeOverlay"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/space_2xs"
                         android:text="@string/timer_zero"
                         android:visibility="invisible" />
-                </FrameLayout>
+                </LinearLayout>
             </LinearLayout>
 
             <!-- 右：预录缓冲状态 + 设置入口 -->

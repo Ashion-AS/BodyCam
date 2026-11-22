@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  提示条底：比面板更实（scrim_well）。
+
+  提示经常压在高对比的视频画面上，不能像顶栏那样指望文字投影兜底，
+  所以这里用接近实底的 scrim_well，保证任何背景上文字都读得清。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/scrim_well" />
+    <stroke
+        android:width="@dimen/rule_hair"
+        android:color="@color/rule" />
+    <corners android:radius="@dimen/radius_panel" />
+</shape>

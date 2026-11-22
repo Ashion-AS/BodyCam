@@ -42,6 +42,9 @@
     <!-- 底部操作坞：圆形图标按钮的直径，比 touch_target 大一档，拇指更容易命中 -->
     <dimen name="dock_button_size">56dp</dimen>
 
+    <!-- 录音页读数行：按 18sp 计时的行高兜底，就绪与计时切换时不跳 -->
+    <dimen name="audio_readout_min_height">24dp</dimen>
+
     <!-- 竖向缩放条：宽度只放把手与读数，高度约占屏幕一半，拇指从边沿滑进来就够 -->
     <dimen name="zoom_slider_width">44dp</dimen>
     <dimen name="zoom_slider_height">280dp</dimen>

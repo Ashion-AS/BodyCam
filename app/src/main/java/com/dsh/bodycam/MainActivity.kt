@@ -22,7 +22,6 @@ import android.view.View
 import android.view.WindowManager
 import android.util.Log
 import android.widget.TextView
-import android.widget.Toast
 import com.dsh.bodycam.camera.CameraController
 import com.dsh.bodycam.camera.CameraSpec
 import com.dsh.bodycam.core.AppConfig
@@ -34,6 +33,7 @@ import com.dsh.bodycam.light.LightController
 import com.dsh.bodycam.record.PreRecordBuffer
 import com.dsh.bodycam.record.SegmentRecorder
 import com.dsh.bodycam.service.KeepAliveService
+import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.util.DiskGuard
 import com.dsh.bodycam.util.Storage
 import com.dsh.bodycam.util.StoragePermission
@@ -195,12 +195,16 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     private val ticker = object : Runnable {
         override fun run() {
-            // 一直走，不只在录像时走：否则空闲时预览上的时间会停在进入应用的时刻
-            if (resumed) {
+            // 一直走，不只在录像时走：否则空闲时预览上的时间会停在进入应用的时刻。
+            // 息屏后 resumed 为 false，但录像仍在继续、渲染线程仍在给编码器出帧，
+            // 水印必须跟着走，否则成片里的时间与 REC 计时会冻结在息屏那一刻。
+            if (resumed || recording) {
                 updateWatermark()
-                updateTimer()
+                // 磁盘巡检内部已按 !recording 短路；息屏录制同样要巡检，否则满盘不停录
                 checkDiskDuringRecording()
             }
+            // 计时文本是纯 UI，息屏时不需要刷新
+            if (resumed) updateTimer()
             uiHandler.postDelayed(this, TICK_MS)
         }
     }
@@ -344,6 +348,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
+        ToastBar.release(this)
         // 连拍排程挂在 uiHandler 上，已被上面一并清掉，这里只复位状态
         burstActive = false
         burstRemaining = 0
@@ -1286,8 +1291,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         // 未录像：红实心 + 白字；录像中：反过来，深底 + 红字
         labelRecord.setTextColor(getColor(if (recording) R.color.rec_signal else R.color.ink))
         iconRecord.setColorFilter(getColor(if (recording) R.color.rec_signal else R.color.ink))
-        // 顶栏第二行：空闲显示录像图标，录像时换成红色计时（二者互斥占位，高度恒定）
-        iconRecordStatus.visibility = if (recording) View.GONE else View.VISIBLE
+        // 顶栏第二行：录像图标常驻，录像时在它右侧接上红色计时
+        // （计时 INVISIBLE 占位，宽度恒定，录制开始/结束时顶栏不跳动）
         timerView.visibility = if (recording) View.VISIBLE else View.INVISIBLE
         updatePreRecordDot()
         // 补光灯状态可能因会话重建而变化，按钮高亮每次都按真实状态重画
@@ -1295,6 +1300,6 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     }
 
     private fun toast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        ToastBar.show(this, message)
     }
 }

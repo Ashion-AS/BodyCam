@@ -11,14 +11,13 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.KeyEvent
-import android.view.View
 import android.view.WindowManager
 import android.widget.TextView
-import android.widget.Toast
 import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.core.SettingsStore
 import com.dsh.bodycam.core.TriggerRouter
 import com.dsh.bodycam.record.AudioRecorder
+import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.ui.WaveformView
 import com.dsh.bodycam.util.Storage
 import com.dsh.bodycam.util.StoragePermission
@@ -55,8 +54,9 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
     }
 
     private lateinit var waveform: WaveformView
-    private lateinit var timerView: TextView
-    private lateinit var statusView: TextView
+
+    /** 读数行：未录音显示就绪提示，录音中显示计时，两者共用一个控件 */
+    private lateinit var readoutView: TextView
     private lateinit var btnToggle: TextView
 
     private var recorder: AudioRecorder? = null
@@ -69,7 +69,7 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
 
     private val ticker = object : Runnable {
         override fun run() {
-            if (recording) updateTimer()
+            if (recording) showReadout()
             uiHandler.postDelayed(this, TICK_MS)
         }
     }
@@ -79,12 +79,12 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
         setContentView(R.layout.activity_audio_record)
 
         waveform = findViewById(R.id.waveform)
-        timerView = findViewById(R.id.timerView)
-        statusView = findViewById(R.id.statusView)
+        readoutView = findViewById(R.id.readoutView)
         btnToggle = findViewById(R.id.btnToggle)
 
         recorder = AudioRecorder(this).apply {
             levelListener = { level -> onLevel(level) }
+            micFailureListener = { onMicFailure() }
         }
 
         findViewById<TextView>(R.id.btnBack).setOnClickListener { finish() }
@@ -104,6 +104,7 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
 
     override fun onDestroy() {
         uiHandler.removeCallbacksAndMessages(null)
+        ToastBar.release(this)
         recorder?.release() // 未保存的录音直接收尾成文件，不会丢
         recorder = null
         stopExecutor.shutdown()
@@ -246,6 +247,18 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
         }
     }
 
+    /**
+     * 音频线程判定麦克风已失效（连续读不到数据）后的回调。
+     * 走与手动停止相同的收尾路径：已录到的分段照常提交，不会丢文件。
+     */
+    private fun onMicFailure() {
+        uiHandler.post {
+            if (!recording) return@post // 用户已自行停止，交给那条路径收尾
+            toast(getString(R.string.audio_mic_lost))
+            stopRecording()
+        }
+    }
+
     private fun onSaved(entries: List<Storage.Entry>, micPeak: Int) {
         saving = false
         if (isDestroyed) return
@@ -271,15 +284,28 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
         uiHandler.post(ticker)
     }
 
-    private fun updateTimer() {
-        if (!recording) {
-            timerView.text = getString(R.string.timer_zero)
-            return
-        }
-        val total = (SystemClock.elapsedRealtime() - recordStartElapsed) / 1000
-        timerView.text = String.format(
-            Locale.US, "%02d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60
+    private fun elapsedSeconds(): Long =
+        (SystemClock.elapsedRealtime() - recordStartElapsed) / 1000
+
+    /**
+     * 刷新读数行。
+     *
+     * 一个控件承担两种角色：录音中显示红色等宽计时，其余时候显示就绪提示。
+     * 两种文字样式不同（字号 18sp / 14sp），用 setTextAppearance 切，不硬编码颜色字号。
+     */
+    private fun showReadout() {
+        val running = recording || saving
+        readoutView.setTextAppearance(
+            if (running) R.style.BodyCamInstrumentLarge else R.style.BodyCamLabel
         )
+        if (running) {
+            val total = elapsedSeconds()
+            readoutView.text = String.format(
+                Locale.US, "%02d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60
+            )
+        } else {
+            readoutView.text = getString(R.string.audio_status_ready)
+        }
     }
 
     private fun updateUi() {
@@ -291,13 +317,10 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
         )
         // 未录音：红实心 + 白字；录音中：深底 + 红字（与主界面的录像键同一套双态）
         btnToggle.setTextColor(getColor(if (recording) R.color.rec_signal else R.color.ink))
-        statusView.text = getString(
-            if (recording) R.string.audio_status_recording else R.string.audio_status_ready
-        )
-        timerView.visibility = if (recording || saving) View.VISIBLE else View.GONE
+        showReadout()
     }
 
     private fun toast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        ToastBar.show(this, message)
     }
 }

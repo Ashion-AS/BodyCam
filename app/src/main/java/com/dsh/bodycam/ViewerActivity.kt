@@ -8,12 +8,12 @@ import android.util.Log
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
-import android.widget.Toast
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.ui.ZoomableImageView
 import com.dsh.bodycam.util.MuxerFix
 import com.dsh.bodycam.util.Storage
@@ -89,6 +89,7 @@ class ViewerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ToastBar.release(this)
         playerView.player = null
         player?.release()
         player = null
@@ -179,6 +180,6 @@ class ViewerActivity : Activity() {
     // ------------------------------------------------------------ 工具
 
     private fun toast(message: String) {
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        ToastBar.show(this, message)
     }
 }

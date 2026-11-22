@@ -8,9 +8,9 @@ import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.Switch
 import android.widget.TextView
-import android.widget.Toast
 import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.core.SettingsStore
+import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.util.StoragePermission
 
 /**
@@ -168,12 +168,18 @@ class SettingsActivity : Activity() {
         }
         buildSegment(rgDuration, options, SettingsStore.preRecordSeconds(this)) { seconds ->
             SettingsStore.setPreRecordSeconds(this, seconds)
-            Toast.makeText(
-                this,
-                getString(R.string.settings_pre_record_duration_fmt, seconds),
-                Toast.LENGTH_SHORT
-            ).show()
+            toast(getString(R.string.settings_pre_record_duration_fmt, seconds))
         }
+    }
+
+    /** 全局提示条，位置与互斥由 [ToastBar] 统一管理 */
+    private fun toast(message: String) {
+        ToastBar.show(this, message)
+    }
+
+    override fun onDestroy() {
+        ToastBar.release(this)
+        super.onDestroy()
     }
 
     /** 拍照补光：关闭 / 自动 / 强制，三选一，横排 */

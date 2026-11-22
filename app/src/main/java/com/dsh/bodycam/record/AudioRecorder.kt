@@ -36,6 +36,12 @@ class AudioRecorder(private val context: Context) {
     companion object {
         private const val TAG = "AudioRecorder"
         private const val STOP_TIMEOUT_MS = 4_000L
+
+        /** 麦克风读取失败后的退避间隔；不退避会把 while 打成空转死循环 */
+        private const val READ_RETRY_BACKOFF_MS = 20L
+
+        /** 连续读取失败达到这个次数（约 2 秒）就判定麦克风失效，主动收尾 */
+        private const val READ_FAILURE_LIMIT = 100
     }
 
     private val lock = Object()
@@ -72,6 +78,13 @@ class AudioRecorder(private val context: Context) {
     /** 波形电平回调，值域 0~1。在音频线程调用 */
     @Volatile
     var levelListener: ((Float) -> Unit)? = null
+
+    /**
+     * 麦克风读取连续失败、录音被迫中止时回调一次（在音频线程调用）。
+     * 收尾走的是与正常停止相同的路径，已写入的分段照常提交。
+     */
+    @Volatile
+    var micFailureListener: (() -> Unit)? = null
 
     /** 是否正在录音 */
     val isRecording: Boolean get() = running
@@ -159,6 +172,8 @@ class AudioRecorder(private val context: Context) {
         var lastPtsUs = 0L
         var eosQueued = false
         var stopDeadline = 0L
+        var readFailures = 0
+        var micFailed = false
 
         while (true) {
             if (stopping) {
@@ -170,6 +185,7 @@ class AudioRecorder(private val context: Context) {
                     -1
                 }
                 if (read > 0) {
+                    readFailures = 0
                     // 送进编码器的 PTS 用绝对时基（随采样帧数单调递增），
                     // 输出端再按每段起点换算成单文件内的相对时间轴。
                     val ptsUs = frames * US_PER_SECOND / SAMPLE_RATE
@@ -177,6 +193,22 @@ class AudioRecorder(private val context: Context) {
                     feedAudio(codec, pcm, read, ptsUs)
                     lastPtsUs = ptsUs
                     emitLevel(pcm, read)
+                } else {
+                    // 麦克风失效时 read 会立刻返回错误码而不是阻塞等待，
+                    // 不退避的话这一轮 while 就变成空转：CPU 打满、电平回调
+                    // 再也不触发，波形表现为直接冻结但计时器照走。
+                    readFailures++
+                    if (readFailures >= READ_FAILURE_LIMIT) {
+                        Log.w(TAG, "mic read failed $readFailures times, abort recording")
+                        micFailed = true
+                        stopping = true
+                    } else {
+                        try {
+                            Thread.sleep(READ_RETRY_BACKOFF_MS)
+                        } catch (e: InterruptedException) {
+                            break
+                        }
+                    }
                 }
             }
 
@@ -219,6 +251,10 @@ class AudioRecorder(private val context: Context) {
                 }
             }
         }
+
+        // 麦克风失效导致的自行收尾：running 保持 true，让后续 stop()/release()
+        // 仍然走完整的资源释放路径，避免 codec / AudioRecord 泄漏。
+        if (micFailed) micFailureListener?.invoke()
     }
 
     /** 收到一帧编码后的音频：到点先换分段，再写进当前 muxer（调用方持锁） */

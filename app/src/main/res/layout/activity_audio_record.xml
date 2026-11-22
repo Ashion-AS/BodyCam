@@ -55,31 +55,28 @@
         android:paddingHorizontal="@dimen/space_md"
         android:paddingVertical="@dimen/space_lg" />
 
-    <!-- 音频页没有画面盖层，状态字号不需要叠加投影，走实底样式 -->
+    <!--
+      读数行：未录音显示就绪提示（14sp ink），录音中显示计时（18sp 红色等宽）。
+      两种状态共用一个控件，样式在代码里用 setTextAppearance 切换；
+      字号不同但行高由 minHeight 兜住，所以开始/停止录音时这一行高度不跳。
+    -->
     <TextView
-        android:id="@+id/statusView"
-        style="@style/BodyCamInstrument"
+        android:id="@+id/readoutView"
+        style="@style/BodyCamLabel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/space_md"
         android:gravity="center"
-        android:paddingTop="@dimen/space_md"
+        android:maxLines="1"
+        android:minHeight="@dimen/audio_readout_min_height"
         android:text="@string/audio_status_ready" />
 
-    <TextView
-        android:id="@+id/timerView"
-        style="@style/BodyCamInstrumentLarge"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:paddingTop="@dimen/space_xs"
-        android:text="@string/timer_zero" />
-
-    <!-- 下半部：二合一主控件，居中，离底留出拇指行程 -->
+    <!-- 下半部：二合一主控件，撑满可用宽度，离底留出拇指行程 -->
     <TextView
         android:id="@+id/btnToggle"
         style="@style/BodyCamTitle"
         android:layout_width="match_parent"
-        android:layout_height="@dimen/control_bar_height"
+        android:layout_height="@dimen/control_size"
         android:layout_marginHorizontal="@dimen/space_xl"
         android:layout_marginTop="@dimen/space_lg"
         android:layout_marginBottom="@dimen/space_xl"

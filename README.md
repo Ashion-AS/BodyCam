@@ -103,6 +103,7 @@ app/src/main/
 │   ├── record/CodecSupport.kt       # 三个 recorder 共用的编码器/音频采集样板
 │   ├── gl/WatermarkEngine.kt        # JNI 声明（与 jni_bridge.cpp 一一对应）
 │   ├── gl/GlPipeline.kt             # handle 生命周期封装
+│   ├── ui/ToastBar.kt               # 全局提示条：窗口偏下位置，新提示顶掉旧提示
 │   ├── ui/WaveformView.kt           # 录音页的滚动声音波形（自定义 View）
 │   ├── ui/ZoomSliderView.kt         # 主界面右侧竖向缩放条（数字变焦）
 │   ├── ui/ZoomableImageView.kt      # 看图：双指缩放 / 拖动 / 双击放大
@@ -255,6 +256,9 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 - 水印内容：`日期 时间` / `GPS 经纬度与精度` / `REC 时长 + 设备编号`。
 - 由 `WatermarkPainter` 用 Canvas 画成 ARGB_8888 位图（宽度 = 画面宽度 60%），
   **每秒重画一次**，通过 JNI 传给 GL 线程上传为纹理。
+  刷新由 `MainActivity` 的 ticker 驱动，条件是「界面可见 **或** 正在录像」：
+  息屏后 `onPause` 会置 `resumed = false`，但录像仍在继续、渲染线程仍在给
+  编码器出帧，所以必须继续重画，否则成片里的时间与 `REC` 计时会冻结在息屏那一刻。
 - GL 侧用 4 个顶点画一个带旋转的四边形，混合方式为预乘 alpha
   （`GL_ONE, GL_ONE_MINUS_SRC_ALPHA`），不产生离屏 FBO、不做回读。
 - **方向只在纹理坐标上旋转**：几何顶点始终铺满视口，所以竖屏时把 16:9 的画面
@@ -748,6 +752,40 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 
 ---
 
+## 八点十一、提示条（`ui/ToastBar`）
+
+全应用的文字提示统一走 `ui/ToastBar`，不再用系统 `Toast`。
+
+**为什么不用系统 Toast**：Android 11（API 30）起系统会忽略文本 Toast 的
+`setGravity()`，一律钉在屏幕底部，拿不到「中下」这个位置。`ToastBar` 用
+`PopupWindow` 自绘一条，位置与样式全部可控。
+
+**两条行为约定**：
+
+| 特性 | 实现 |
+| --- | --- |
+| 位置 | 窗口中下部，`Gravity.BOTTOM or CENTER_HORIZONTAL` 偏移窗口高度的 28%，避开底部操作坞 |
+| 互斥 | 新提示到来时**复用同一个窗口**只换文字（不销毁重建），因此连续提示之间没有窗口空档 |
+| 动画 | 窗口上屏前先置 `alpha = 0` 再淡入（140ms），所以不会有「先不透明画一帧再跳透明」的闪烁 |
+| 淡出 | 停留 1.8s 后淡出（120ms）再真正关闭；淡出途中来新提示则直接升回不透明接着用 |
+| 停留 | 固定 1.8 秒（比系统 `LENGTH_SHORT` 略短，减少干扰） |
+| 触摸 | `isTouchable = false`，出现期间页面控件照常可点 |
+| 生命周期 | 各 Activity 在 `onDestroy` 调 `ToastBar.release(this)`；`owner` / `label` 另用 `WeakReference` 兜底，漏调也不会拖住 Activity |
+| 视觉 | 底色 `scrim_well` + `rule` 描边 + `radius_panel` 圆角，文字 `ink` / `text_md`，全部复用设计令牌 |
+
+**为什么要复用窗口**：这是消除闪烁的关键。Popwin 若每次 `dismiss()` + `showAtLocation()`，
+两次调用之间必有一帧没有任何窗口覆盖，叠在高对比的取景画面上就是「闪一下」。
+复用后窗口始终在屏，只改文字与 alpha，画面连续。
+
+**为什么淡入前要先置透明**：`showAtLocation` 之后窗口会立刻合成一帧。如果在它之后
+才把 alpha 归零，那一帧已经以不透明状态画出来了，接着跳到透明——这一帧就是闪烁。
+所以透明度必须在 `showAtLocation` **之前**设好。
+
+调用方式：各页面保留自己的 `private fun toast(message: String)`，内部改为
+`ToastBar.show(this, message)`，业务代码的调用点无需改动。
+
+---
+
 ## 九、常改参数（`core/AppConfig.kt`）
 
 | 参数 | 说明 |
@@ -855,6 +893,7 @@ codecs)` 决定样本 flags 里的 `sample_is_non_sync_sample`（bit16）。构�
 | 空分段清理 | 已加：一帧未写入的段会被删除，不留几 KB 空壳文件 |
 | 音频时基 | 改用 CLOCK_BOOTTIME（与相机帧时间戳同一时基），修复机器休眠后音轨 0 样本的问题 |
 | 空闲水印时钟 | 常驻刷新，不再只在录像时走 |
+| 息屏录像水印 | 已修：水印刷新原先被 `if (resumed)` 挡住，息屏后成片里的时间与 `REC` 计时冻结；现改为「可见或录像中」都刷新，同时息屏期间的磁盘巡检也恢复生效 |
 | 切后台再回前台 | 已修：`renderFrame` 在无绘制目标时也要 `updateTexImage()` 消费相机帧，否则缓冲队列堵死、回来黑屏；同时回前台重建预览会话 |
 | 预录交接 | 通过：预录 10 秒 + 录 5 秒，成片约 15 秒，单文件、开头可正常解码 |
 | 预录花屏 | 已修（待真机复验）：三处根因——(1) 编码器 PTS 回退到 `steady_clock` 与相机 `CLOCK_BOOTTIME` 混源；(2) 环形队列按时间窗裁剪会切在非 I 帧上；(3) muxer 就绪前的实时帧被直接丢弃。现改为 PTS 只在相机时间戳有效时出帧、按帧数裁剪并对齐关键帧、就绪前缓存至多 60 帧按序补写 |
