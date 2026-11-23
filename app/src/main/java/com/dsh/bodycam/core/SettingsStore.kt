@@ -39,6 +39,7 @@ object SettingsStore {
     private const val KEY_BURST_COUNT = "burst_count"
     private const val KEY_LOOP_RECORD = "loop_record"
     private const val KEY_DISK_WARN_MB = "disk_warn_mb"
+    private const val KEY_BATTERY_WARN_PERCENT = "battery_warn_percent"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
@@ -182,6 +183,15 @@ object SettingsStore {
 
     fun setDiskWarnMb(context: Context, mb: Int) {
         prefs(context).edit().putInt(KEY_DISK_WARN_MB, mb).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 电量告警阈值（百分比）；强制停录线由 [AppConfig] 按比例算出 */
+    fun batteryWarnPercent(context: Context): Int =
+        prefs(context).getInt(KEY_BATTERY_WARN_PERCENT, AppConfig.DEFAULT_BATTERY_WARN_PERCENT)
+
+    fun setBatteryWarnPercent(context: Context, percent: Int) {
+        prefs(context).edit().putInt(KEY_BATTERY_WARN_PERCENT, percent).apply()
         listener?.onSettingsChanged()
     }
 

@@ -34,6 +34,7 @@ import com.dsh.bodycam.record.PreRecordBuffer
 import com.dsh.bodycam.record.SegmentRecorder
 import com.dsh.bodycam.service.KeepAliveService
 import com.dsh.bodycam.ui.ToastBar
+import com.dsh.bodycam.util.BatteryGuard
 import com.dsh.bodycam.util.DiskGuard
 import com.dsh.bodycam.util.Storage
 import com.dsh.bodycam.util.StoragePermission
@@ -175,6 +176,10 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     @Volatile
     private var diskCheckRunning = false
 
+    /** 上次电量巡检时刻；电量慢得多，30 秒一次即可 */
+    private var lastBatteryCheckElapsed = 0L
+    private var lastBatteryWarnElapsed = 0L
+
     /** 监听设置变化，销毁时解除，避免旧 Activity 被持有 */
     private var settingsListener: SettingsStore.Listener? = null
 
@@ -202,6 +207,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
                 updateWatermark()
                 // 磁盘巡检内部已按 !recording 短路；息屏录制同样要巡检，否则满盘不停录
                 checkDiskDuringRecording()
+                // 电量同理：息屏录制时必须巡检，否则电量耗尽直接断电、收尾来不及
+                checkBatteryDuringRecording()
             }
             // 计时文本是纯 UI，息屏时不需要刷新
             if (resumed) updateTimer()
@@ -1239,6 +1246,62 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private fun notifyLowDisk(freeMb: Long) {
         val intent = Intent(this, KeepAliveService::class.java)
             .putExtra(KeepAliveService.EXTRA_LOW_DISK, getString(R.string.notification_low_disk, freeMb))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+        else startService(intent)
+    }
+
+    // ------------------------------------------------------------ 电量兜底
+
+    /**
+     * 录像期间巡检电量，与 [checkDiskDuringRecording] 同一套节流与线程模型。
+     *
+     * 行为：
+     *  - 低于**告警线**：提示一次（30 秒节流），并更新前台通知；
+     *  - 低于**强制停录线**：安全停录，走 [stopRecording]，编码器尾帧排空、
+     *    最后一个 moof+mdat 写出，文件仍是可播放的 fMP4；
+     *  - **充电中一律视为正常**：插上充电器即自动解除低电量状态。
+     *
+     * 读电量本身是 `registerReceiver(null, ...)` 取 sticky 广播，很快，
+     * 但仍按磁盘的做法丢到后台线程，避免任何机型上的意外阻塞。
+     */
+    private fun checkBatteryDuringRecording() {
+        if (!recording || savingSegment) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBatteryCheckElapsed < AppConfig.BATTERY_CHECK_MS) return
+        lastBatteryCheckElapsed = now
+
+        diskExecutor.execute {
+            val status = runCatching { BatteryGuard.inspect(this) }.getOrNull()
+            if (status == null || isDestroyed) return@execute
+            uiHandler.post { onBatteryStatus(status) }
+        }
+    }
+
+    private fun onBatteryStatus(status: BatteryGuard.Status) {
+        val now = SystemClock.elapsedRealtime()
+        when (status.level) {
+            BatteryGuard.Level.OK -> Unit
+            BatteryGuard.Level.WARN -> {
+                if (now - lastBatteryWarnElapsed < DISK_WARN_TOAST_MS) return
+                lastBatteryWarnElapsed = now
+                toast(getString(R.string.battery_low_warn, status.percent))
+                notifyLowBattery(status.percent)
+            }
+            BatteryGuard.Level.STOP -> {
+                toast(getString(R.string.battery_low_stop, status.percent))
+                notifyLowBattery(status.percent)
+                stopRecording()
+            }
+        }
+    }
+
+    /** 电量不足时把告警文案推给前台服务，更新常驻通知（息屏也能看到） */
+    private fun notifyLowBattery(percent: Int) {
+        val intent = Intent(this, KeepAliveService::class.java)
+            .putExtra(
+                KeepAliveService.EXTRA_LOW_BATTERY,
+                getString(R.string.notification_low_battery, percent)
+            )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
         else startService(intent)
     }

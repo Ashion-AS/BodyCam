@@ -23,6 +23,7 @@ class SettingsActivity : Activity() {
     private lateinit var swLoopRecord: Switch
     private lateinit var swDebugOverlay: Switch
     private lateinit var rgDiskWarn: RadioGroup
+    private lateinit var rgBatteryWarn: RadioGroup
     private lateinit var rgPhotoFlash: RadioGroup
     private lateinit var rgPhotoMode: RadioGroup
     private lateinit var rgPhotoQuality: RadioGroup
@@ -45,6 +46,7 @@ class SettingsActivity : Activity() {
         swLoopRecord = findViewById(R.id.swLoopRecord)
         swDebugOverlay = findViewById(R.id.swDebugOverlay)
         rgDiskWarn = findViewById(R.id.rgDiskWarn)
+        rgBatteryWarn = findViewById(R.id.rgBatteryWarn)
         rgPhotoFlash = findViewById(R.id.rgPhotoFlash)
         rgPhotoMode = findViewById(R.id.rgPhotoMode)
         rgPhotoQuality = findViewById(R.id.rgPhotoQuality)
@@ -87,6 +89,7 @@ class SettingsActivity : Activity() {
         buildPhotoSizeOptions()
         buildBurstOptions()
         buildDiskWarnOptions()
+        buildBatteryWarnOptions()
         updateSections()
     }
 
@@ -303,6 +306,18 @@ class SettingsActivity : Activity() {
         }
         buildSegment(rgDiskWarn, options, SettingsStore.diskWarnMb(this)) { mb ->
             SettingsStore.setDiskWarnMb(this, mb)
+        }
+    }
+
+    /** 电量告警阈值：档位来自 [AppConfig.BATTERY_WARN_OPTIONS_PERCENT] */
+    private fun buildBatteryWarnOptions() {
+        val options = AppConfig.BATTERY_WARN_OPTIONS_PERCENT.map {
+            it to getString(R.string.settings_battery_warn_fmt, it)
+        }
+        buildSegment(
+            rgBatteryWarn, options, SettingsStore.batteryWarnPercent(this)
+        ) { percent ->
+            SettingsStore.setBatteryWarnPercent(this, percent)
         }
     }
 

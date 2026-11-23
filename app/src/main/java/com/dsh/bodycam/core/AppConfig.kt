@@ -106,6 +106,32 @@ object AppConfig {
     /** 磁盘巡检间隔（毫秒）：录制中按这个节奏查剩余空间，2 秒一次开销可忽略 */
     const val DISK_CHECK_MS = 2000L
 
+    // ------------------------------------------------------------ 电量
+
+    /**
+     * 电量告警阈值的可选档位（百分比），默认 [DEFAULT_BATTERY_WARN_PERCENT]。
+     *
+     * 低于该值：提示用户电量不足；充电中不提示（充电即解除低电量状态）。
+     */
+    val BATTERY_WARN_OPTIONS_PERCENT = intArrayOf(10, 15, 20, 30)
+    const val DEFAULT_BATTERY_WARN_PERCENT = 15
+
+    /**
+     * 强制停录阈值 = 告警阈值 / [BATTERY_STOP_DIVISOR]，且不低于
+     * [BATTERY_STOP_MIN_PERCENT]。默认 15% 告警 → 5% 强制停。
+     *
+     * 与磁盘同理：调大告警档位时停止线同步抬高，留出余量把当前分段正常收尾。
+     * 电量百分比是整数，所以最低取 1%，不会出现 0。
+     */
+    const val BATTERY_STOP_DIVISOR = 3
+    const val BATTERY_STOP_MIN_PERCENT = 5
+
+    /**
+     * 电量巡检间隔（毫秒）。电量变化比磁盘慢得多，且读的是 sticky 广播
+     * （不注册回调），30 秒一次足够，接近没开销。
+     */
+    const val BATTERY_CHECK_MS = 30_000L
+
     /**
      * 固定节点的灯光通路（sysfs）。
      *

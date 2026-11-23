@@ -18,6 +18,10 @@
     <string name="settings_disk_warn_summary">剩余空间低于该值时告警；强制停录线约为它的五分之一（最低 100MB）</string>
     <string name="settings_disk_warn_fmt">%1$d MB</string>
 
+    <string name="settings_battery_warn_title">电量告警阈值</string>
+    <string name="settings_battery_warn_summary">电量低于该值时告警；强制停录线约为它的三分之一（最低 5%）。充电中不会触发。息屏录像同样生效</string>
+    <string name="settings_battery_warn_fmt">%1$d%%</string>
+
     <string name="settings_debug_overlay_title">调试校准行</string>
     <string name="settings_debug_overlay_summary">主页预览左上角显示 S/D/R 角度与流尺寸，点一下循环校准方向。仅现场排障用，正式使用建议关闭</string>
 

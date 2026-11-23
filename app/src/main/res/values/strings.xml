@@ -33,6 +33,11 @@
     <string name="disk_full_stop">存储空间即将耗尽（剩余 %1$d MB），已停止录像并保存当前文件</string>
     <string name="disk_low_refuse_record">存储空间不足（剩余 %1$d MB），无法开始录像</string>
 
+    <!-- 电量 -->
+    <string name="battery_low_warn">电量不足（剩余 %1$d%%），请及时充电；接近耗尽时会自动停止录像</string>
+    <string name="battery_low_stop">电量即将耗尽（剩余 %1$d%%），已停止录像并保存当前文件</string>
+    <string name="notification_low_battery">电量不足（剩余 %1$d%%），请尽快充电</string>
+
     <!-- 摄像头控制 -->
     <string name="action_torch">补光灯</string>
     <string name="action_switch_camera">切换摄像头</string>

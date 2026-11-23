@@ -34,6 +34,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 时间水印（OpenGL + C++，低功耗） | `cpp/renderer.cpp` 合成 OES 纹理 + 水印纹理，EGL 直出到编码器 |
 | 30 分钟自动分段 | `SegmentRecorder`：编码器不停，只在分段点换一个新的 fMP4 封装器 |
 | 循环录像 / 磁盘兜底 | `DiskGuard`：剩余空间低于阈值时删最早的已结束分段，或安全停录（见「八点十」） |
+| 低电量兜底 | `BatteryGuard`：电量低于阈值时提示，接近耗尽时安全停录；充电中不触发，息屏同样生效（见「八点十之二」） |
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
 | 预录开启提示 | 顶栏右侧**黄点**（`preRecordDot`），设置页可开关 |
@@ -119,6 +120,7 @@ app/src/main/
 │   ├── util/Rotation.kt             # Surface 旋转常量 → 角度
 │   ├── util/MuxerFix.kt             # 回填 fMP4 的 duration、修正音频同步样本位、注入 tfdt、追写 mfra 索引（media3 muxer 的四个补丁）
 │   ├── util/DiskGuard.kt            # 剩余空间检查 + 循环录像清理（只删 BodyCam/Video 下的 VID_ 分段）
+│   ├── util/BatteryGuard.kt         # 电量两级阈值检查（告警 / 安全停录），充电中一律视为正常
 │   └── util/Storage.kt              # 文件落盘 + 文件页的目录枚举（list）
 └── res/                             # 布局（主界面/设置页/文件页/查看页）、主题、图标、无障碍配置
 ```
@@ -902,6 +904,41 @@ patchMfra()              → 按新偏移追写 mfra 随机访问索引（八点
 
 ---
 
+## 八点十之二、电量兜底（`util/BatteryGuard`）
+
+电量耗尽时设备直接断电，录像来不及正常收尾——虽然 fMP4 的分片结构能兜住大部分
+已落盘内容，但最后未 flush 的部分仍有丢帧风险。`BatteryGuard` 与 `DiskGuard`
+同构，把这件事也做成两级阈值。
+
+**入口**：设置页「电量告警阈值」四档（10% / 15% / 20% / 30%，默认 15%）。
+
+| 电量 | 行为 |
+| --- | --- |
+| > 告警阈值，或充电中 | 不动作 |
+| ≤ 告警阈值 | 提示「电量不足」，节流到 30 秒一次；同时更新前台通知 |
+| ≤ 强制停录线 | **安全停录**，走正常 `stopRecording()` |
+
+强制停录线 = 告警阈值 ÷ 3，且不低于 5%。默认 15% 告警 → 5% 强制停。
+调大告警档位时停止线同步抬高，始终留出把当前分段正常收尾的余量。
+
+### 边界处理
+
+| 方面 | 行为 |
+| --- | --- |
+| 充电中 | **一律视为正常**：`EXTRA_STATUS` 为 CHARGING / FULL 时直接返回 OK，插上充电器即自动解除低电量状态，不需要额外的解除逻辑 |
+| 读不到电量 | 返回 OK，宁可不停录——与 `DiskGuard.freeBytes()` 拿不到空间时返回 `Long.MAX_VALUE` 同一取舍 |
+| 读数来源 | `registerReceiver(null, IntentFilter(ACTION_BATTERY_CHANGED))` 取 sticky 广播，一次调用同时拿到 `EXTRA_LEVEL / EXTRA_SCALE` 与充电状态。不用 `BATTERY_PROPERTY_CAPACITY`：部分机型上它返回 `Int.MIN_VALUE` |
+| 收尾完整性 | 与磁盘兜底同一路径：`stopRecording()` 排空编码器尾帧、写出最后一个 `moof+mdat`，文件仍是可播放的 fMP4 |
+| 息屏 / 后台 | 挂在 `MainActivity.ticker` 上，和磁盘巡检同一个循环；`if (resumed || recording)` 保证屏幕熄灭后照常巡检 |
+| 巡检间隔 | `BATTERY_CHECK_MS` 默认 30 秒。电量变化比磁盘慢得多，且读的是 sticky 广播（不注册回调），开销可忽略 |
+| 线程 | 与磁盘共用 `diskExecutor`，不占主线程 |
+| 提示 | 主界面 toast + 前台服务常驻通知正文（息屏也能看到） |
+
+> 只作用于**录像**。录音页（`AudioRecordActivity`）目前没有磁盘巡检，也没有
+> 电量巡检；电量耗尽时它同样会被系统杀掉，但录音的收尾代价比录像小得多。
+
+---
+
 ## 八点十一、提示条（`ui/ToastBar`）
 
 全应用的文字提示统一走 `ui/ToastBar`，不再用系统 `Toast`。
@@ -959,6 +996,9 @@ patchMfra()              → 按新偏移追写 mfra 随机访问索引（八点
 | `DISK_WARN_OPTIONS_MB` / `DEFAULT_DISK_WARN_MB` | 空间告警阈值的可选档位与默认值（默认 500MB） |
 | `DISK_STOP_DIVISOR` / `DISK_STOP_MIN_MB` | 强制停录线 = 告警阈值 ÷ 该除数，且不低于最小 MB（默认 ÷5、100MB）（见「八点十」） |
 | `DISK_CHECK_MS` | 录制期间的磁盘巡检间隔，默认 2000ms |
+| `BATTERY_CHECK_MS` | 录制期间的电量巡检间隔，默认 30000ms |
+| `DEFAULT_BATTERY_WARN_PERCENT` | 电量告警阈值默认值，默认 15（%） |
+| `BATTERY_STOP_DIVISOR` / `BATTERY_STOP_MIN_PERCENT` | 强制停录线 = 告警 ÷ 3，且不低于 5% |
 
 画幅不写死：`R` 为 90/270 时输出 1080×1920，否则 1920×1080；
 相机流尺寸由 `CameraController.listCameras()` 从设备支持的 `SurfaceTexture` 尺寸里挑

@@ -9,12 +9,13 @@
     行 3  存储访问权限（状态 + 去开启）
     行 4  循环录像开关（空间不足时删最早分段）
     行 5  空间告警阈值（分段选项）
-    行 6  调试校准行开关
-    行 7  拍照补光（分段选项）
-    行 8  拍照模式（分段选项 + 一句说明）
-    行 9  连拍间隔与张数（仅连拍模式显示）
-    行 10 拍照质量（分段选项）
-    行 11 拍照尺寸（两行两列）
+    行 6  电量告警阈值（分段选项）
+    行 7  调试校准行开关
+    行 8  拍照补光（分段选项）
+    行 9  拍照模式（分段选项 + 一句说明）
+    行 10 连拍间隔与张数（仅连拍模式显示）
+    行 11 拍照质量（分段选项）
+    行 12 拍照尺寸（两行两列）
 
   行与行之间共用 1dp 分隔线，行本身是 paper_2；不叠卡片、不加投影。
 -->
@@ -240,7 +241,37 @@
                     android:text="@string/settings_disk_warn_summary" />
             </LinearLayout>
 
-            <!-- 行 6：调试校准行开关（默认关闭） -->
+            <!-- 行 6：电量告警阈值 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_battery_warn_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgBatteryWarn"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_battery_warn_summary" />
+            </LinearLayout>
+
+            <!-- 行 7：调试校准行开关（默认关闭） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -279,7 +310,7 @@
                     android:minHeight="@dimen/touch_target" />
             </LinearLayout>
 
-            <!-- 行 7：拍照补光 -->
+            <!-- 行 8：拍照补光 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -309,7 +340,7 @@
                     android:text="@string/settings_photo_flash_summary" />
             </LinearLayout>
 
-            <!-- 行 8：拍照模式（单拍 / 连拍） -->
+            <!-- 行 9：拍照模式（单拍 / 连拍） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -339,7 +370,7 @@
                     android:layout_marginTop="@dimen/space_2xs" />
             </LinearLayout>
 
-            <!-- 行 9：连拍间隔与张数（仅连拍模式显示） -->
+            <!-- 行 10：连拍间隔与张数（仅连拍模式显示） -->
             <LinearLayout
                 android:id="@+id/burstSection"
                 android:layout_width="match_parent"
@@ -384,7 +415,7 @@
                     android:text="@string/settings_burst_summary" />
             </LinearLayout>
 
-            <!-- 行 10：拍照质量 -->
+            <!-- 行 11：拍照质量 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -414,7 +445,7 @@
                     android:text="@string/settings_photo_quality_summary" />
             </LinearLayout>
 
-            <!-- 行 11：拍照尺寸 -->
+            <!-- 行 12：拍照尺寸 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
