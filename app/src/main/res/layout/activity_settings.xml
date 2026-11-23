@@ -2,20 +2,35 @@
 <!--
   设置页：一张「登记表」，不是卡片流。
 
-  结构：
-    顶栏  返回 + 标题，1dp 分隔线
-    行 1  预录开关（标题 + 一句说明 + 开关）
-    行 2  预录时长（分段选项，关闭预录时整行降到 40% 不透明度且不可点）
-    行 3  存储访问权限（状态 + 去开启）
-    行 4  循环录像开关（空间不足时删最早分段）
-    行 5  空间告警阈值（分段选项）
-    行 6  电量告警阈值（分段选项）
-    行 7  调试校准行开关
-    行 8  拍照补光（分段选项）
-    行 9  拍照模式（分段选项 + 一句说明）
-    行 10 连拍间隔与张数（仅连拍模式显示）
-    行 11 拍照质量（分段选项）
-    行 12 拍照尺寸（两行两列）
+  结构：按「编码 → 录像 → 拍照」三部分分区，每区一个 muted 小标题；
+  分组标题只是纸面上的栏目名，不铺底色、不加投影。
+
+  编码设置（决定编码器与成片规格）
+    行 1  录像分辨率（分段选项）
+    行 2  录像帧率（分段选项）
+    行 3  录像画质（分段选项）
+    行 4  视频声音开关
+    行 5  生效时机提示（纯文字）
+
+  录像设置（决定怎么录、录多久、什么时候停）
+    行 6  预录开关（标题 + 一句说明 + 开关）
+    行 7  预录时长（分段选项，关闭预录时整行降到 40% 不透明度且不可点）
+    行 8  延录时长（分段选项，0 = 关闭）
+    行 9  分段时长（分段选项）
+    行 9  循环录像开关（空间不足时删最早分段）
+    行 10 空间告警阈值（分段选项）
+    行 11 电量告警阈值（分段选项）
+    行 12 存储访问权限（状态 + 去开启）
+
+  拍照设置
+    行 13 拍照补光（分段选项）
+    行 14 拍照模式（分段选项 + 一句说明）
+    行 15 连拍间隔与张数（仅连拍模式显示）
+    行 16 拍照质量（分段选项）
+    行 17 拍照尺寸（两行两列）
+
+  其他
+    行 18 调试校准行开关
 
   行与行之间共用 1dp 分隔线，行本身是 paper_2；不叠卡片、不加投影。
 -->
@@ -65,7 +80,167 @@
             android:orientation="vertical"
             android:paddingBottom="@dimen/space_xl">
 
-            <!-- 行 1：预录开关 -->
+            <!-- ==================== 编码设置 ==================== -->
+
+            <TextView
+                style="@style/BodyCamSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingTop="@dimen/space_lg"
+                android:paddingBottom="@dimen/space_xs"
+                android:text="@string/settings_section_encode" />
+
+            <!-- 行 1：录像分辨率 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_video_size_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgVideoSize"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_video_size_summary" />
+            </LinearLayout>
+
+            <!-- 行 2：录像帧率 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_video_fps_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgVideoFps"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_video_fps_summary" />
+            </LinearLayout>
+
+            <!-- 行 3：录像画质 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_video_quality_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgVideoQuality"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_video_quality_summary" />
+            </LinearLayout>
+
+            <!-- 行 4：视频声音开关 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_video_audio_title" />
+
+                    <TextView
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_2xs"
+                        android:text="@string/settings_video_audio_summary" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swVideoAudio"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:minWidth="@dimen/touch_target"
+                    android:minHeight="@dimen/touch_target" />
+            </LinearLayout>
+
+            <!-- 行 5：生效时机提示 -->
+            <TextView
+                style="@style/BodyCamHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_sm"
+                android:text="@string/settings_video_next_run_hint" />
+
+            <!-- ==================== 录像设置 ==================== -->
+
+            <TextView
+                style="@style/BodyCamSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingTop="@dimen/space_lg"
+                android:paddingBottom="@dimen/space_xs"
+                android:text="@string/settings_section_record" />
+
+            <!-- 行 6：预录开关 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -104,7 +279,7 @@
                     android:minHeight="@dimen/touch_target" />
             </LinearLayout>
 
-            <!-- 行 2：预录时长 -->
+            <!-- 行 7：预录时长 -->
             <LinearLayout
                 android:id="@+id/durationSection"
                 android:layout_width="match_parent"
@@ -128,7 +303,170 @@
                     android:orientation="horizontal" />
             </LinearLayout>
 
-            <!-- 行 3：存储访问权限 -->
+            <!-- 行：延录时长（0 = 关闭） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_post_record_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgPostRecord"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_post_record_summary" />
+            </LinearLayout>
+
+            <!-- 行 8：分段时长 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_segment_title" />
+
+                <!--
+                   分段时长：5 档且带「分钟」后缀，一行排不下会被压扁变形，
+                   改成每行 4 格、共 2 行，每格等宽。
+                -->
+                <LinearLayout
+                    android:id="@+id/llSegmentMinutes"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="vertical" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_segment_summary" />
+            </LinearLayout>
+
+            <!-- 行 9：循环录像开关（默认关闭） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_loop_record_title" />
+
+                    <TextView
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_2xs"
+                        android:text="@string/settings_loop_record_summary" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swLoopRecord"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:minWidth="@dimen/touch_target"
+                    android:minHeight="@dimen/touch_target" />
+            </LinearLayout>
+
+            <!-- 行 10：空间告警阈值 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_disk_warn_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgDiskWarn"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_disk_warn_summary" />
+            </LinearLayout>
+
+            <!-- 行 11：电量告警阈值 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_battery_warn_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgBatteryWarn"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_battery_warn_summary" />
+            </LinearLayout>
+
+            <!-- 行 12：存储访问权限 -->
             <LinearLayout
                 android:id="@+id/storageRow"
                 android:layout_width="match_parent"
@@ -172,145 +510,18 @@
                     android:textColor="@color/accent" />
             </LinearLayout>
 
-            <!-- 行 4：循环录像开关（默认关闭） -->
-            <LinearLayout
+            <!-- ==================== 拍照设置 ==================== -->
+
+            <TextView
+                style="@style/BodyCamSection"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_row"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/space_lg"
+                android:paddingBottom="@dimen/space_xs"
+                android:text="@string/settings_section_photo" />
 
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        style="@style/BodyCamLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_loop_record_title" />
-
-                    <TextView
-                        style="@style/BodyCamHint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/space_2xs"
-                        android:text="@string/settings_loop_record_summary" />
-                </LinearLayout>
-
-                <Switch
-                    android:id="@+id/swLoopRecord"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_sm"
-                    android:minWidth="@dimen/touch_target"
-                    android:minHeight="@dimen/touch_target" />
-            </LinearLayout>
-
-            <!-- 行 5：空间告警阈值 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_row"
-                android:orientation="vertical"
-                android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
-
-                <TextView
-                    style="@style/BodyCamLabel"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/settings_disk_warn_title" />
-
-                <RadioGroup
-                    android:id="@+id/rgDiskWarn"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_sm"
-                    android:orientation="horizontal" />
-
-                <TextView
-                    style="@style/BodyCamHint"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_2xs"
-                    android:text="@string/settings_disk_warn_summary" />
-            </LinearLayout>
-
-            <!-- 行 6：电量告警阈值 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_row"
-                android:orientation="vertical"
-                android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
-
-                <TextView
-                    style="@style/BodyCamLabel"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/settings_battery_warn_title" />
-
-                <RadioGroup
-                    android:id="@+id/rgBatteryWarn"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_sm"
-                    android:orientation="horizontal" />
-
-                <TextView
-                    style="@style/BodyCamHint"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_2xs"
-                    android:text="@string/settings_battery_warn_summary" />
-            </LinearLayout>
-
-            <!-- 行 7：调试校准行开关（默认关闭） -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_row"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        style="@style/BodyCamLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_debug_overlay_title" />
-
-                    <TextView
-                        style="@style/BodyCamHint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/space_2xs"
-                        android:text="@string/settings_debug_overlay_summary" />
-                </LinearLayout>
-
-                <Switch
-                    android:id="@+id/swDebugOverlay"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="@dimen/space_sm"
-                    android:minWidth="@dimen/touch_target"
-                    android:minHeight="@dimen/touch_target" />
-            </LinearLayout>
-
-            <!-- 行 8：拍照补光 -->
+            <!-- 行 13：拍照补光 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -340,7 +551,7 @@
                     android:text="@string/settings_photo_flash_summary" />
             </LinearLayout>
 
-            <!-- 行 9：拍照模式（单拍 / 连拍） -->
+            <!-- 行 14：拍照模式（单拍 / 连拍） -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -370,7 +581,7 @@
                     android:layout_marginTop="@dimen/space_2xs" />
             </LinearLayout>
 
-            <!-- 行 10：连拍间隔与张数（仅连拍模式显示） -->
+            <!-- 行 15：连拍间隔与张数（仅连拍模式显示） -->
             <LinearLayout
                 android:id="@+id/burstSection"
                 android:layout_width="match_parent"
@@ -415,7 +626,7 @@
                     android:text="@string/settings_burst_summary" />
             </LinearLayout>
 
-            <!-- 行 11：拍照质量 -->
+            <!-- 行 16：拍照质量 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -445,7 +656,7 @@
                     android:text="@string/settings_photo_quality_summary" />
             </LinearLayout>
 
-            <!-- 行 12：拍照尺寸 -->
+            <!-- 行 17：拍照尺寸 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -479,6 +690,56 @@
                     android:text="@string/settings_photo_size_summary" />
             </LinearLayout>
 
+            <!-- ==================== 其他 ==================== -->
+
+            <TextView
+                style="@style/BodyCamSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingTop="@dimen/space_lg"
+                android:paddingBottom="@dimen/space_xs"
+                android:text="@string/settings_section_other" />
+
+            <!-- 行 18：调试校准行开关（默认关闭） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_debug_overlay_title" />
+
+                    <TextView
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_2xs"
+                        android:text="@string/settings_debug_overlay_summary" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swDebugOverlay"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:minWidth="@dimen/touch_target"
+                    android:minHeight="@dimen/touch_target" />
             </LinearLayout>
+
+        </LinearLayout>
     </ScrollView>
 </LinearLayout>

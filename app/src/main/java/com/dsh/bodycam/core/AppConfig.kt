@@ -2,8 +2,6 @@ package com.dsh.bodycam.core
 
 /** 集中放置可调参数：改分辨率、码率、水印位置都只需要动这里 */
 object AppConfig {
-    const val VIDEO_FPS = 30
-    const val VIDEO_BITRATE = 12_000_000
     const val AUDIO_BITRATE = 128_000
     const val AUDIO_SAMPLE_RATE = 48_000
 
@@ -17,11 +15,77 @@ object AppConfig {
     /** 水印上的设备编号，可按需改成警号 */
     const val DEVICE_ID = "DEV-0001"
 
+    // ------------------------------------------------------------ 录像参数档位
+
     /**
-     * 分段长度（秒）。到点后编码器不中断，只换一个新的 muxer 继续写，
-     * 所以分段处不丢画面，音频最多丢约 1 帧。
+     * 录像分辨率档位（长边 × 短边）。相机不一定支持全部档位，
+     * 选到不支持的一档时由 [com.dsh.bodycam.camera.CameraSpec.resolveVideoSize]
+     * 按面积就近回退。竖屏输出为 `短边 × 长边`，宽高由现有画幅逻辑交换。
      */
-    const val SEGMENT_SECONDS = 30 * 60
+    fun videoSizeOptions(): List<Pair<Int, Int>> = listOf(
+        3840 to 2160,   // 4K
+        1920 to 1080,   // 1080P
+        1280 to 720,    // 720P
+        720 to 480      // D1
+    )
+
+    /** 分辨率档位的显示名；顺序与 [videoSizeOptions] 一一对应 */
+    val VIDEO_SIZE_LABELS = listOf("4K", "1080P", "720P", "D1")
+
+    /** 默认档位下标：1080P */
+    const val VIDEO_SIZE_DEFAULT_INDEX = 1
+
+    /** 录像帧率档位 */
+    val VIDEO_FPS_OPTIONS = intArrayOf(15, 20, 25, 30, 60)
+    const val DEFAULT_VIDEO_FPS = 30
+
+    /**
+     * 画质档位：同一档位在不同分辨率下取不同码率。
+     *
+     * 码率按「每像素每帧多少比特」估算而不是写死常数：4K 用 1080P 的码率
+     * 会糊成一片，720P 用 4K 的码率只是白白占空间。系数取 0.10 / 0.06 / 0.035
+     * 三档（H.264 常见取值），再按实测习惯向下取整到 0.5Mbps。
+     */
+    const val VIDEO_QUALITY_HIGH = 0
+    const val VIDEO_QUALITY_MEDIUM = 1
+    const val VIDEO_QUALITY_LOW = 2
+
+    /** 各画质档对应的「每像素每帧比特数」 */
+    private val QUALITY_BPP = floatArrayOf(0.10f, 0.06f, 0.035f)
+
+    /** 码率下限 / 上限，避免极端组合算出离谱的值 */
+    private const val BITRATE_MIN = 1_000_000
+    private const val BITRATE_MAX = 60_000_000
+
+    /**
+     * 按分辨率、帧率与画质档算目标码率。
+     *
+     * 结果按 0.5Mbps 取整，同档位在不同分辨率/帧率下都落在合理区间：
+     * 1080P30 高档 ≈ 6.2Mbps，4K30 高档 ≈ 24.9Mbps，720P30 低档 ≈ 1.8Mbps。
+     */
+    fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
+        val bpp = QUALITY_BPP.getOrElse(quality) { QUALITY_BPP[VIDEO_QUALITY_HIGH] }
+        // 先算整数像素×帧率，最后再乘浮点系数：Long×Float 的结果是 Float，
+        // 直接参与 coerceIn(Long, Long) 会类型不匹配
+        val pixels = width.toLong() * height * fps
+        val raw = (pixels * bpp).toLong()
+        val clamped = raw.coerceIn(BITRATE_MIN.toLong(), BITRATE_MAX.toLong())
+        // 向下取整到 0.5Mbps，避免出现 6234567 这种没有意义的精度
+        val halfMb = 500_000L
+        return ((clamped / halfMb) * halfMb).toInt().coerceAtLeast(BITRATE_MIN)
+    }
+
+    /** 画质档位的显示名；顺序与 [VIDEO_QUALITY_*] 对应 */
+    val VIDEO_QUALITY_LABELS = listOf("高", "中", "低")
+
+    /** 默认画质：高 */
+    const val VIDEO_QUALITY_DEFAULT = VIDEO_QUALITY_HIGH
+
+    /** 分段时长可选档位（分钟） */
+    val SEGMENT_MINUTE_OPTIONS = intArrayOf(5, 10, 15, 20, 30)
+
+    /** 默认分段时长（分钟） */
+    const val DEFAULT_SEGMENT_MINUTES = 30
 
     /**
      * 录音分段长度（秒）。到点后编码器不中断，只换一个新的 muxer 继续写，

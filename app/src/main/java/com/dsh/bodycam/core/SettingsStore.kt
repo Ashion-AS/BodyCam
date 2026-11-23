@@ -23,6 +23,7 @@ object SettingsStore {
     private const val PREFS = "bodycam_settings"
     private const val KEY_PRE_RECORD_ENABLED = "pre_record_enabled"
     private const val KEY_PRE_RECORD_SECONDS = "pre_record_seconds"
+    private const val KEY_POST_RECORD_SECONDS = "post_record_seconds"
     private const val KEY_TRIGGER_KEYCODE_SHUTTER = "trigger_keycode_shutter"
     private const val KEY_TRIGGER_KEYCODE_RECORD = "trigger_keycode_record"
     private const val KEY_TRIGGER_KEYCODE_AUDIO = "trigger_keycode_audio"
@@ -40,11 +41,21 @@ object SettingsStore {
     private const val KEY_LOOP_RECORD = "loop_record"
     private const val KEY_DISK_WARN_MB = "disk_warn_mb"
     private const val KEY_BATTERY_WARN_PERCENT = "battery_warn_percent"
+    private const val KEY_VIDEO_SIZE_INDEX = "video_size_index"
+    private const val KEY_VIDEO_FPS = "video_fps"
+    private const val KEY_VIDEO_QUALITY = "video_quality"
+    private const val KEY_SEGMENT_MINUTES = "segment_minutes"
+    private const val KEY_VIDEO_AUDIO = "video_audio"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
 
     const val DEFAULT_PRE_RECORD_SECONDS = 10
+
+    /** 延录时长可选项；0 = 关闭延录，按下停止即停 */
+    val POST_RECORD_OPTIONS = intArrayOf(0, 5, 10, 15, 30)
+
+    const val DEFAULT_POST_RECORD_SECONDS = 10
 
     interface Listener {
         fun onSettingsChanged()
@@ -78,6 +89,22 @@ object SettingsStore {
 
     fun setPreRecordSeconds(context: Context, seconds: Int) {
         prefs(context).edit().putInt(KEY_PRE_RECORD_SECONDS, seconds).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /**
+     * 延录时长（秒）：按下停止后再多录这么久才真正收尾，0 表示关闭。
+     *
+     * 与预录互补：预录抓「按键之前」，延录抓「按键之后」。
+     * 读的时候校验档位，避免旧值让倒计时跑出个奇怪的长度。
+     */
+    fun postRecordSeconds(context: Context): Int {
+        val v = prefs(context).getInt(KEY_POST_RECORD_SECONDS, DEFAULT_POST_RECORD_SECONDS)
+        return if (v in POST_RECORD_OPTIONS) v else DEFAULT_POST_RECORD_SECONDS
+    }
+
+    fun setPostRecordSeconds(context: Context, seconds: Int) {
+        prefs(context).edit().putInt(KEY_POST_RECORD_SECONDS, seconds).apply()
         listener?.onSettingsChanged()
     }
 
@@ -192,6 +219,62 @@ object SettingsStore {
 
     fun setBatteryWarnPercent(context: Context, percent: Int) {
         prefs(context).edit().putInt(KEY_BATTERY_WARN_PERCENT, percent).apply()
+        listener?.onSettingsChanged()
+    }
+
+    // ------------------------------------------------------------ 录像参数
+
+    /**
+     * 录像分辨率档位下标（[AppConfig.videoSizeOptions] 的下标）。
+     * 存下标而不是像素：换机器后由相机层回退到最接近的可用档。
+     */
+    fun videoSizeIndex(context: Context): Int =
+        prefs(context).getInt(KEY_VIDEO_SIZE_INDEX, AppConfig.VIDEO_SIZE_DEFAULT_INDEX)
+
+    fun setVideoSizeIndex(context: Context, index: Int) {
+        prefs(context).edit().putInt(KEY_VIDEO_SIZE_INDEX, index).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 录像帧率 */
+    fun videoFps(context: Context): Int {
+        val v = prefs(context).getInt(KEY_VIDEO_FPS, AppConfig.DEFAULT_VIDEO_FPS)
+        // 非法值会让 MediaFormat 配置失败、编码器起不来，读的时候兜一下
+        return if (v in AppConfig.VIDEO_FPS_OPTIONS) v else AppConfig.DEFAULT_VIDEO_FPS
+    }
+
+    fun setVideoFps(context: Context, fps: Int) {
+        prefs(context).edit().putInt(KEY_VIDEO_FPS, fps).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 录像画质档：见 [AppConfig.VIDEO_QUALITY_HIGH] / MEDIUM / LOW */
+    fun videoQuality(context: Context): Int =
+        prefs(context).getInt(KEY_VIDEO_QUALITY, AppConfig.VIDEO_QUALITY_DEFAULT)
+
+    fun setVideoQuality(context: Context, quality: Int) {
+        prefs(context).edit().putInt(KEY_VIDEO_QUALITY, quality).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 分段时长（分钟）；实际写入时换算成秒交给录制器 */
+    fun segmentMinutes(context: Context): Int {
+        val v = prefs(context).getInt(KEY_SEGMENT_MINUTES, AppConfig.DEFAULT_SEGMENT_MINUTES)
+        // 档位外的旧值（升级前存的）按默认档处理，避免录出一个 0 分钟的分段
+        return if (v in AppConfig.SEGMENT_MINUTE_OPTIONS) v else AppConfig.DEFAULT_SEGMENT_MINUTES
+    }
+
+    fun setSegmentMinutes(context: Context, minutes: Int) {
+        prefs(context).edit().putInt(KEY_SEGMENT_MINUTES, minutes).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 录像是否带声音。关闭后不创建音频编码器，成片只有视频轨 */
+    fun isVideoAudioEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_VIDEO_AUDIO, true)
+
+    fun setVideoAudioEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_VIDEO_AUDIO, enabled).apply()
         listener?.onSettingsChanged()
     }
 

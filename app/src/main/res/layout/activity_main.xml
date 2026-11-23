@@ -171,6 +171,47 @@
             android:paddingHorizontal="@dimen/space_sm"
             android:paddingVertical="@dimen/space_xs"
             android:visibility="gone" />
+
+        <!--
+          延录提示条：按下停止后仍在这段时间里继续录。
+
+          必须显眼且可交互——用户会以为已经停了，所以要给出倒计时，
+          并留一个「继续录像」把这次停止撤销掉（对应需求里的
+          「延录期间再按录像 → 取消延录、继续正常录像」）。
+          用 accent 描边而不是实心：它是一段临时状态，不该和红色录像态抢。
+        -->
+        <LinearLayout
+            android:id="@+id/postRecordBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="@dimen/space_md"
+            android:layout_marginTop="@dimen/space_xs"
+            android:background="@drawable/bg_panel"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="@dimen/space_sm"
+            android:paddingVertical="@dimen/space_xs"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/postRecordText"
+                style="@style/BodyCamInstrumentOverlay"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="@color/accent" />
+
+            <TextView
+                android:id="@+id/btnPostRecordCancel"
+                style="@style/BodyCamLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="@dimen/touch_target"
+                android:layout_marginStart="@dimen/space_sm"
+                android:gravity="center"
+                android:paddingHorizontal="@dimen/space_sm"
+                android:text="@string/post_record_cancel"
+                android:textColor="@color/accent" />
+        </LinearLayout>
     </LinearLayout>
 
     <!--

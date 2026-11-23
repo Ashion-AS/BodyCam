@@ -95,6 +95,14 @@ class PreRecordBuffer(private val context: Context) {
     var startedHeight = 0
         private set
 
+    /** 启动时的编码参数，设置页改了这些也要重启缓存（交接的帧必须与新编码器一致） */
+    var startedFps = 0
+        private set
+    var startedBitrate = 0
+        private set
+    var startedAudio = false
+        private set
+
     val isRunning: Boolean get() = capturing
 
     /**
@@ -111,14 +119,18 @@ class PreRecordBuffer(private val context: Context) {
     ): Surface? {
         synchronized(lock) {
             if (capturing) {
-                return if (startedWidth == width && startedHeight == height) {
-                    videoSurface
-                } else {
-                    null  // 尺寸变了，调用方应先 release 再 start
-                }
+                // 已在跑：尺寸或编码参数任一对不上就要求调用方先 release 再 start，
+                // 否则交接给录制器的帧格式与录制器新起的编码器不一致
+                val same = startedWidth == width && startedHeight == height &&
+                        startedFps == fps.coerceAtLeast(1) && startedBitrate == bitrate &&
+                        startedAudio == withAudio
+                return if (same) videoSurface else null
             }
             bufferSeconds = keepSeconds
             this.fps = fps.coerceAtLeast(1)
+            this.startedFps = this.fps
+            this.startedBitrate = bitrate
+            this.startedAudio = withAudio
             videoQueue.clear()
             audioQueue.clear()
             videoFormat = null
@@ -246,6 +258,9 @@ class PreRecordBuffer(private val context: Context) {
             audioFormat = null
             startedWidth = 0
             startedHeight = 0
+            startedFps = 0
+            startedBitrate = 0
+            startedAudio = false
         }
     }
 

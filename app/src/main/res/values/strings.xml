@@ -27,6 +27,14 @@
     <string name="audio_silent">注意：本次录像几乎没有声音（麦克风峰值 %1$d）</string>
     <string name="rotation_offset">校准 +%1$d°  R=%2$d  输出 %3$d×%4$d</string>
 
+    <!-- 延录 -->
+    <string name="post_record_text">延录中 %1$d 秒</string>
+    <string name="post_record_cancel">继续录像</string>
+    <string name="post_record_started">延录 %1$d 秒，再按停止可立即结束</string>
+    <string name="notification_post_record">延录中，还剩 %1$d 秒</string>
+    <string name="action_stop_now">立即停止</string>
+    <string name="btn_stop_now">立即停止</string>
+
     <!-- 磁盘空间 -->
     <string name="disk_low_loop_off">存储空间不足（剩余 %1$d MB），请及时清理；接近耗尽时会自动停止录像</string>
     <string name="disk_low_no_removable">存储空间不足（剩余 %1$d MB），已无可删除的旧录像</string>

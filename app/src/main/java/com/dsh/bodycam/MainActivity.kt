@@ -101,6 +101,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private lateinit var labelRecord: TextView
     private lateinit var debugView: TextView
     private lateinit var preRecordDot: View
+    private lateinit var postRecordBar: View
+    private lateinit var postRecordText: android.widget.TextView
     private lateinit var btnSettings: View
     private lateinit var btnAudioRecord: View
     private lateinit var btnFiles: View
@@ -168,6 +170,20 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private var recordStartElapsed = 0L
     private var resumed = false
 
+    /**
+     * 延录进行中：用户已按下停止，但还要再录一会儿才真正收尾。
+     *
+     * 此期间 [recording] 仍为 true——编码器与 muxer 完全不动，延录段和主录像
+     * 落在同一个分段里，天然无缝。倒计时结束才进入真正的停止流程。
+     */
+    private var postRecording = false
+
+    /** 延录结束时刻（elapsedRealtime）；非延录态为 0 */
+    private var postRecordEndElapsed = 0L
+
+    /** 上次推给通知栏的剩余秒数，用来避免同一秒内重复 notify */
+    private var lastPostRecordNotifiedSec = -1
+
     /** 上次磁盘巡检时刻；告警提示做了节流，避免每 2 秒弹一次 */
     private var lastDiskCheckElapsed = 0L
     private var lastDiskWarnElapsed = 0L
@@ -209,6 +225,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
                 checkDiskDuringRecording()
                 // 电量同理：息屏录制时必须巡检，否则电量耗尽直接断电、收尾来不及
                 checkBatteryDuringRecording()
+                // 延录倒计时也走这里：息屏时同样要按时收尾
+                tickPostRecord()
             }
             // 计时文本是纯 UI，息屏时不需要刷新
             if (resumed) updateTimer()
@@ -266,10 +284,14 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         settingsListener = object : SettingsStore.Listener {
             override fun onSettingsChanged() {
                 runOnUiThread {
-                    applyPreRecordSetting()
+                    // 录像参数与预录缓存都在 applyVideoSettings 里一并处理
+                    // （它内部会先同步流尺寸再重启缓存，避免按旧尺寸白起一次）
+                    applyVideoSettings()
                     refreshTriggerReceiver()
                     updateDebugInfo()
                     applyPhotoSettings()
+                    // 帧率会显示在顶栏读数里
+                    applyOrientation()
                 }
             }
         }
@@ -333,6 +355,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         if (recording) {
             camera?.setStreaming(true)
         } else {
+            // 从设置页改过分辨率档位时，这里要先把流尺寸同步到新档位，
+            // restartPreview() 才会按新尺寸重建会话（否则仍按旧尺寸出帧）
+            syncStreamSizeToSettings()
             camera?.restartPreview()
         }
         // 后台期间相机可能被系统断开，回前台时重新打开
@@ -405,6 +430,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         labelRecord = findViewById(R.id.labelRecord)
         debugView = findViewById(R.id.debugView)
         preRecordDot = findViewById(R.id.preRecordDot)
+        postRecordBar = findViewById(R.id.postRecordBar)
+        postRecordText = findViewById(R.id.postRecordText)
+        findViewById<View>(R.id.btnPostRecordCancel).setOnClickListener { cancelPostRecord() }
         btnSettings = findViewById(R.id.btnSettings)
         btnAudioRecord = findViewById(R.id.btnAudioRecord)
         btnFiles = findViewById(R.id.btnFiles)
@@ -415,7 +443,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == AppConfig.ACTION_STOP_RECORD && recording) {
-            stopRecording()
+            // 通知栏按钮：延录中点了就是「立即停止」，否则按常规流程（可能进延录）
+            if (postRecording) finishPostRecord() else requestStopRecording()
         }
     }
 
@@ -531,7 +560,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             p.setPreviewWindow(previewView.holder.surface, previewView.width, previewView.height)
         }
 
-        statusView.text = getString(R.string.readout_fmt, videoW, videoH, AppConfig.VIDEO_FPS)
+        statusView.text = getString(
+            R.string.readout_fmt, videoW, videoH, SettingsStore.videoFps(this)
+        )
         updateDebugInfo()
         updateWatermark()
         applyPreRecordSetting()
@@ -545,8 +576,10 @@ class MainActivity : Activity(), TriggerRouter.Listener {
      */
     private fun applyCameraSpec(spec: CameraSpec) {
         currentSpec = spec
-        streamW = spec.videoSize.width
-        streamH = spec.videoSize.height
+        // 相机流尺寸按设置的录像分辨率档位解析，不支持的档位由 spec 就近回退
+        val resolved = resolvedVideoSize(spec)
+        streamW = resolved.width
+        streamH = resolved.height
         sensorOrientation = spec.sensorOrientation
         // 每颗摄像头的变焦能力不同：切过去先按新上限重置到 1x，
         // 不支持缩放的摄像头（zoomMax <= 1）由控件自己隐藏
@@ -745,16 +778,24 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             return
         }
         val enabled = SettingsStore.isPreRecordEnabled(this)
-        val sizeMismatch = buf.isRunning &&
-                (buf.startedWidth != videoW || buf.startedHeight != videoH)
-        if (enabled && !recording && (!buf.isRunning || sizeMismatch)) {
+        val params = videoParams()
+        // 尺寸、帧率、码率、声音开关任一对不上都要重启缓存：
+        // 交接给录制器的编码器与录制器新起的编码器必须参数一致
+        val mismatch = buf.isRunning && (
+                buf.startedWidth != videoW || buf.startedHeight != videoH ||
+                        buf.startedFps != params.fps || buf.startedBitrate != params.bitrate ||
+                        buf.startedAudio != params.audio
+                )
+        if (enabled && !recording && (!buf.isRunning || mismatch)) {
             if (buf.isRunning) {
                 buf.release()
                 p.setPreRecordSurface(null)
             }
             val surface = buf.start(
-                videoW, videoH, AppConfig.VIDEO_FPS, AppConfig.VIDEO_BITRATE,
-                SettingsStore.preRecordSeconds(this)
+                videoW, videoH, params.fps, params.bitrate,
+                SettingsStore.preRecordSeconds(this),
+                // 视频声音关掉时预录也不采音频：交接时不会有 AAC 帧塞进新音轨
+                withAudio = params.audio
             )
             if (surface != null) p.setPreRecordSurface(surface)
         } else if ((!enabled || recording) && buf.isRunning) {
@@ -796,9 +837,90 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         }
         pipeline?.setRotation(rotationDeg.toFloat())
         if (this::statusView.isInitialized) {
-            statusView.text = getString(R.string.readout_fmt, videoW, videoH, AppConfig.VIDEO_FPS)
+            statusView.text = getString(
+                R.string.readout_fmt, videoW, videoH, SettingsStore.videoFps(this)
+            )
         }
         updateDebugInfo()
+    }
+
+    // ------------------------------------------------------------ 录像参数
+
+    /** 一次录像要用到的全部参数，从设置读一次，避免中途被改出不一致的组合 */
+    private class VideoParams(
+        val fps: Int,
+        val bitrate: Int,
+        val segmentSeconds: Int,
+        val audio: Boolean
+    )
+
+    /**
+     * 按当前设置与画幅算本次录像参数。
+     *
+     * 码率由 [AppConfig.videoBitrate] 按「分辨率 × 帧率 × 画质」现算，
+     * 所以分辨率或帧率变了码率会跟着变，不需要单独配。
+     */
+    private fun videoParams(): VideoParams {
+        val fps = SettingsStore.videoFps(this)
+        val quality = SettingsStore.videoQuality(this)
+        return VideoParams(
+            fps = fps,
+            bitrate = AppConfig.videoBitrate(videoW, videoH, fps, quality),
+            segmentSeconds = SettingsStore.segmentMinutes(this) * 60,
+            audio = SettingsStore.isVideoAudioEnabled(this)
+        )
+    }
+
+    /**
+     * 按设置里的分辨率档位解析出这颗摄像头实际可用的流尺寸。
+     *
+     * 相机上报的尺寸是传感器方向（长边在前），设置页的档位也是长边×短边，
+     * 所以直接按长边/短边比较即可；竖屏/横屏的交换由 [applyOrientation] 做。
+     */
+    private fun resolvedVideoSize(spec: CameraSpec): android.util.Size {
+        val (long, short) = AppConfig.videoSizeOptions()
+            .getOrElse(SettingsStore.videoSizeIndex(this)) { AppConfig.videoSizeOptions()[1] }
+        return spec.resolveVideoSize(long, short)
+    }
+
+    /**
+     * 把 `streamW/streamH` 同步到设置里的分辨率档位（不改会话，只改尺寸与画幅）。
+     *
+     * @return true 表示尺寸真的变了，调用方需要重建相机会话才能生效
+     */
+    private fun syncStreamSizeToSettings(): Boolean {
+        val spec = currentSpec ?: return false
+        val target = resolvedVideoSize(spec)
+        if (target.width == streamW && target.height == streamH) return false
+        streamW = target.width
+        streamH = target.height
+        // 流尺寸变了，SurfaceTexture 必须跟着改，否则相机会按旧尺寸出帧、画面被拉伸
+        surfaceTexture?.setDefaultBufferSize(streamW, streamH)
+        // applyOrientation 内部会在画幅变化时同步 setVideoSize + setRotation
+        applyOrientation()
+        return true
+    }
+
+    /**
+     * 分辨率档位变化后重建取景链路。
+     *
+     * 改相机输出尺寸只能靠重建 `SurfaceTexture` 的 buffer 尺寸 + 重建相机会话，
+     * 所以录像期间不动（等下一次开录前由 [startRecording] 前的检查兜住），
+     * 停录后再应用。切摄像头走的也是同一条重建路径（见 [switchCamera]）。
+     */
+    private fun applyVideoSettings() {
+        // 分段时长即时生效：只改下一个分段边界，不影响正在写的这段
+        if (recording) recorder?.setSegmentSeconds(SettingsStore.segmentMinutes(this) * 60)
+        // 录像期间不能动相机会话，等停录收尾时（onSegmentSaved）再补；
+        // 其余参数只影响编码器，由 startRecording 现读，无需在这里处理
+        if (!recording && !savingSegment) {
+            if (syncStreamSizeToSettings()) {
+                camera?.restartPreview()
+            }
+        }
+        // 预录缓存要跟设置保持一致，且不受录像状态限制：
+        // 录中改参数时缓存本来就已交接/释放，这里只是刷新黄点
+        applyPreRecordSetting()
     }
 
     /** 把相机画面转正所需的角度：传感器方向 - 屏幕方向 */
@@ -1042,7 +1164,12 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     // ------------------------------------------------------------ 录像
 
     private fun toggleRecording() {
-        if (recording) stopRecording() else startRecording()
+        when {
+            // 延录中再按一次：立即收尾
+            postRecording -> finishPostRecord()
+            recording -> requestStopRecording()
+            else -> startRecording()
+        }
     }
 
     private fun startRecording() {
@@ -1072,16 +1199,20 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         cam.setStreaming(true)
         // 按当前姿态确定画幅（竖屏 1080x1920），并在录制期间锁死，避免中途改尺寸
         applyOrientation()
-        // 全应用固定竖屏：录制期间无需再额外锁方向，这里只是确保保持竖屏
-        applyOrientation()
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
 
         // 预录交接：预录开着且缓存正在跑，就把「编码器 + 最近 N 秒帧」一并
         // 交给录制器（成片 = 预录画面 + 实时画面，单个文件）；GL 不换 Surface。
         // 顺序关键：先同步摘掉 GL 的预录 Surface，渲染线程不再出帧，编码器
         // 才能安全排空并交接；否则编码器缓冲满会让 GL 渲染线程卡住。
+        val params = videoParams()
         val handover = preRecordBuffer?.takeIf { it.isRunning }?.let { buf ->
-            if (buf.startedWidth != videoW || buf.startedHeight != videoH) {
+            // 尺寸或编码参数对不上就不能交接：交接的编码器会被录制器直接接管，
+            // 它的实际 fps/码率与本次设置的参数不一致会污染成片规格
+            val compatible = buf.startedWidth == videoW && buf.startedHeight == videoH &&
+                    buf.startedFps == params.fps && buf.startedBitrate == params.bitrate &&
+                    buf.startedAudio == params.audio
+            if (!compatible) {
                 buf.release()
                 null
             } else {
@@ -1095,10 +1226,11 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         }
 
         val surface = rec.start(
-            videoW, videoH, AppConfig.VIDEO_FPS, AppConfig.VIDEO_BITRATE,
+            videoW, videoH, params.fps, params.bitrate,
             0,  // 画面已经烘成正向，不需要再写 rotation 元数据
-            AppConfig.SEGMENT_SECONDS,
-            handover
+            params.segmentSeconds,
+            handover,
+            params.audio
         )
         if (surface == null) {
             // 交接出去的编码器归录制器管，失败时得由录制器释放；这里只需提示
@@ -1113,18 +1245,109 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         TriggerRouter.recording = true
         recordStartElapsed = SystemClock.elapsedRealtime()
 
-        val intent = Intent(this, KeepAliveService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-        else startService(intent)
+        notifyRecordingService(Intent(this, KeepAliveService::class.java))
 
         startTicker()
         updateUi()
     }
 
     /**
+     * 按下停止键的入口：延录时长 > 0 时先进入延录倒计时，否则立即停。
+     *
+     * 延录期间编码器与 muxer 完全不动（[recording] 保持 true），
+     * 所以延录段和主录像落在同一个分段里，衔接处没有断点。
+     */
+    private fun requestStopRecording() {
+        // 没配延录：按下即停，行为与改造前一致
+        val extra = SettingsStore.postRecordSeconds(this)
+        if (extra <= 0) {
+            stopRecording()
+            return
+        }
+        // 已在延录中走到这里说明是重复触发，忽略（再按一次由 toggleRecording 拦）
+        if (postRecording) return
+        postRecording = true
+        postRecordEndElapsed = SystemClock.elapsedRealtime() + extra * 1000L
+        lastPostRecordNotifiedSec = -1
+        postRecordBar.visibility = View.VISIBLE
+        // 提示条与通知栏同时进入「延录中」，避免用户以为已经停了
+        updatePostRecordText()
+        updatePostRecordNotification()
+        updateUi()
+        toast(getString(R.string.post_record_started, extra))
+    }
+
+    /**
+     * 撤销延录状态（提示条、倒计时、按钮文案三处一起收）。
+     *
+     * 调用方决定接下来做什么：[cancelPostRecord] 继续录，[finishPostRecord] 收尾。
+     */
+    private fun resetPostRecord() {
+        postRecording = false
+        postRecordEndElapsed = 0L
+        // onDestroy 的同步收尾路径可能在视图绑好之前就走到这里
+        if (this::postRecordBar.isInitialized) postRecordBar.visibility = View.GONE
+    }
+
+    /**
+     * 取消延录、回到正常录像（延录期间再按录像键）。
+     *
+     * 只是把状态抹掉：编码器从头到尾都没停过，所以「继续」是零成本的。
+     */
+    private fun cancelPostRecord() {
+        if (!postRecording) return
+        resetPostRecord()
+        updatePostRecordNotification()
+        updateUi()
+    }
+
+    /** 延录倒计时走完（或用户再按一次停止）：真正进入收尾流程 */
+    private fun finishPostRecord() {
+        if (!postRecording) return
+        resetPostRecord()
+        stopRecording()
+    }
+
+    /** 延录剩余秒数，向上取整：剩 1.2 秒显示 2 秒，更符合「还要等多久」的直觉 */
+    private fun postRecordRemainingSec(): Int {
+        val leftMs = (postRecordEndElapsed - SystemClock.elapsedRealtime()).coerceAtLeast(0L)
+        return ((leftMs + 999L) / 1000L).toInt()
+    }
+
+    /** 延录提示条上的剩余秒数 */
+    private fun updatePostRecordText() {
+        if (!postRecording) return
+        postRecordText.text = getString(R.string.post_record_text, postRecordRemainingSec())
+    }
+
+    /**
+     * 通知栏切到「延录中」并带上剩余秒数；退出延录时恢复默认正文。
+     *
+     * 与磁盘/电量告警走同一条通路：再送一个 extra 给 [KeepAliveService] 改正文。
+     */
+    private fun updatePostRecordNotification() {
+        if (!recording) return
+        val intent = Intent(this, KeepAliveService::class.java)
+        if (postRecording) {
+            intent.putExtra(
+                KeepAliveService.EXTRA_POST_RECORD,
+                getString(R.string.notification_post_record, postRecordRemainingSec())
+            )
+        } else {
+            intent.putExtra(KeepAliveService.EXTRA_POST_RECORD_CLEAR, true)
+        }
+        notifyRecordingService(intent)
+    }
+
+    /**
+     * 真正停止录像：关编码器、写尾帧、保存文件。
+     *
      * @param wait true 时同步等待编码器收尾（Activity 销毁时用，保证文件写完）
      */
     private fun stopRecording(wait: Boolean = false) {
+        // 走到这里说明延录（若配置过）已经结束或用户要求立即停
+        resetPostRecord()
+
         if (!recording) return
         recording = false
         TriggerRouter.recording = false
@@ -1165,15 +1388,19 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         if (isDestroyed) return
         // 录像期间被跳过的拍照尺寸切换，现在补上（会话重建放在停录之后才安全）
         applyPhotoSettings()
+        // 录像期间改过的分辨率档位同理，停录后才重建取景链路
+        applyVideoSettings()
         toast(
             if (files.isEmpty()) getString(R.string.video_failed)
             else getString(R.string.video_saved, files.size, files.last().displayName)
         )
-        // 麦克风峰值极低基本等于没录到声音（静音/被占用/权限问题），提示一下
-        if (files.isNotEmpty() && micPeak < AppConfig.AUDIO_SILENT_THRESHOLD) {
+        // 麦克风峰值极低基本等于没录到声音（静音/被占用/权限问题），提示一下；
+        // 用户主动关掉声音时不提示
+        if (files.isNotEmpty() && SettingsStore.isVideoAudioEnabled(this) &&
+            micPeak < AppConfig.AUDIO_SILENT_THRESHOLD
+        ) {
             toast(getString(R.string.audio_silent, micPeak))
         }
-        applyPreRecordSetting()
     }
 
     private fun startTicker() {
@@ -1237,6 +1464,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             DiskGuard.Level.STOP -> {
                 toast(getString(R.string.disk_full_stop, status.freeBytes / MB))
                 notifyLowDisk(status.freeBytes / MB)
+                // 空间耗尽必须立刻停：不走延录，多录一秒都可能写不完文件
                 stopRecording()
             }
         }
@@ -1244,10 +1472,15 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     /** 空间不足时把告警文案推给前台服务，更新常驻通知（息屏也能看到） */
     private fun notifyLowDisk(freeMb: Long) {
-        val intent = Intent(this, KeepAliveService::class.java)
-            .putExtra(KeepAliveService.EXTRA_LOW_DISK, getString(R.string.notification_low_disk, freeMb))
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
-        else startService(intent)
+        // 延录中优先显示倒计时：告警最多让位几十秒，延录结束正文会自动恢复；
+        // 主界面仍有 ToastBar 提示，不会漏掉告警
+        if (postRecording) return
+        notifyRecordingService(
+            Intent(this, KeepAliveService::class.java).putExtra(
+                KeepAliveService.EXTRA_LOW_DISK,
+                getString(R.string.notification_low_disk, freeMb)
+            )
+        )
     }
 
     // ------------------------------------------------------------ 电量兜底
@@ -1297,11 +1530,23 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     /** 电量不足时把告警文案推给前台服务，更新常驻通知（息屏也能看到） */
     private fun notifyLowBattery(percent: Int) {
-        val intent = Intent(this, KeepAliveService::class.java)
-            .putExtra(
+        // 同磁盘告警：延录倒计时优先占用通知正文
+        if (postRecording) return
+        notifyRecordingService(
+            Intent(this, KeepAliveService::class.java).putExtra(
                 KeepAliveService.EXTRA_LOW_BATTERY,
                 getString(R.string.notification_low_battery, percent)
             )
+        )
+    }
+
+    /**
+     * 给前台服务送一个 intent（可能只带 extra，不改服务生命周期）。
+     *
+     * O 以下用 startService：API 26 起后台启动要前台化，而这里服务早就在跑，
+     * 只是递个 extra 更新通知正文。
+     */
+    private fun notifyRecordingService(intent: Intent) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
         else startService(intent)
     }
@@ -1339,6 +1584,22 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         timerView.text = formatDuration(SystemClock.elapsedRealtime() - recordStartElapsed)
     }
 
+    /** 延录倒计时：走完就收尾；期间每 tick 刷新提示条与通知栏的剩余秒数 */
+    private fun tickPostRecord() {
+        if (!postRecording) return
+        if (SystemClock.elapsedRealtime() >= postRecordEndElapsed) {
+            finishPostRecord()
+            return
+        }
+        updatePostRecordText()
+        // 只在秒数变化时才推通知，避免每 500ms 都以同一个文案 notify 一次
+        val leftSec = postRecordRemainingSec()
+        if (leftSec != lastPostRecordNotifiedSec) {
+            lastPostRecordNotifiedSec = leftSec
+            updatePostRecordNotification()
+        }
+    }
+
     private fun formatDuration(ms: Long): String {
         val total = ms / 1000
         return String.format(
@@ -1347,7 +1608,14 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     }
 
     private fun updateUi() {
-        labelRecord.text = getString(if (recording) R.string.btn_stop else R.string.btn_record)
+        labelRecord.text = getString(
+            when {
+                // 延录中：再按一次是立即收尾，文案直接说清楚
+                postRecording -> R.string.btn_stop_now
+                recording -> R.string.btn_stop
+                else -> R.string.btn_record
+            }
+        )
         iconRecord.setBackgroundResource(
             if (recording) R.drawable.bg_dock_record_on else R.drawable.bg_dock_record
         )

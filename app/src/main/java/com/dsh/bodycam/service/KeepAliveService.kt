@@ -29,6 +29,12 @@ class KeepAliveService : Service() {
 
         /** 附带电量告警文案的 intent extra；服务收到后更新通知正文 */
         const val EXTRA_LOW_BATTERY = "low_battery_text"
+
+        /** 延录中：正文换成「延录中，还剩 N 秒」 */
+        const val EXTRA_POST_RECORD = "post_record_text"
+
+        /** 退出延录：正文恢复默认 */
+        const val EXTRA_POST_RECORD_CLEAR = "post_record_clear"
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -61,20 +67,22 @@ class KeepAliveService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 空间/电量告警：把通知正文换成告警文案（不带额外 action，保持常驻）
-        intent?.getStringExtra(EXTRA_LOW_DISK)?.let { text ->
-            notifyAlert(text)
+        intent?.getStringExtra(EXTRA_LOW_DISK)?.let { updateNotification(it) }
+        intent?.getStringExtra(EXTRA_LOW_BATTERY)?.let { updateNotification(it) }
+        // 延录：正文换成倒计时，动作按钮改成「立即停止」更贴合当前语义
+        intent?.getStringExtra(EXTRA_POST_RECORD)?.let {
+            updateNotification(it, stopNow = true)
         }
-        intent?.getStringExtra(EXTRA_LOW_BATTERY)?.let { text ->
-            notifyAlert(text)
+        if (intent?.getBooleanExtra(EXTRA_POST_RECORD_CLEAR, false) == true) {
+            updateNotification(getString(R.string.notification_text))
         }
         return START_STICKY
     }
 
-    /** 更新前台通知正文为告警文案，标题与停止按钮保持不变 */
-    private fun notifyAlert(text: String) {
-        val notification = buildNotification(text)
+    /** 原地刷新常驻通知：换正文，可选把动作按钮换成「立即停止」 */
+    private fun updateNotification(text: String, stopNow: Boolean = false) {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(AppConfig.NOTIFICATION_ID, notification)
+        manager.notify(AppConfig.NOTIFICATION_ID, buildNotification(text, stopNow))
     }
 
     override fun onDestroy() {
@@ -100,7 +108,10 @@ class KeepAliveService : Service() {
         manager.createNotificationChannel(channel)
     }
 
-    private fun buildNotification(text: String = getString(R.string.notification_text)): Notification {
+    private fun buildNotification(
+        text: String = getString(R.string.notification_text),
+        stopNow: Boolean = false
+    ): Notification {
         val stopIntent = Intent(this, MainActivity::class.java).apply {
             action = AppConfig.ACTION_STOP_RECORD
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
@@ -131,7 +142,9 @@ class KeepAliveService : Service() {
             .setContentIntent(openPending)
             .addAction(
                 Notification.Action.Builder(
-                    null, getString(R.string.action_stop), stopPending
+                    null,
+                    getString(if (stopNow) R.string.action_stop_now else R.string.action_stop),
+                    stopPending
                 ).build()
             )
             .build()

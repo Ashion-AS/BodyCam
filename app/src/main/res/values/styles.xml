@@ -52,6 +52,22 @@
     </style>
 
     <!--
+      分组标题：设置页里把「编码 / 录像 / 拍照」分开的分段标签。
+
+      字号与页面标题同档（16sp），加粗让它明显压过行标题（14sp medium）。
+      颜色与行标题一致用 ink：层级靠「大 + 粗」拉开，不靠换色。
+      用 sans-serif + bold 而不是 sans-serif-medium + bold：
+      后者在中文字体上取不到真正的 Bold 字重，只是假加粗。
+    -->
+    <style name="BodyCamSection">
+        <item name="android:fontFamily">sans-serif</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">@dimen/text_lg</item>
+        <item name="android:textColor">@color/ink</item>
+        <item name="android:includeFontPadding">false</item>
+    </style>
+
+    <!--
       盖在实时画面上的文字（顶栏读数、计时、按键提示、校准面板）。
 
       这些字坐的底是 50% 不透明的 scrim，白色画面上压出来只到中灰：

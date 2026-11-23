@@ -75,6 +75,14 @@ class SegmentRecorder(private val context: Context) {
     private var videoFormat: MediaFormat? = null
     private var audioFormat: MediaFormat? = null
 
+    /**
+     * 本次录制是否带声音（由 [start] 的 `audioEnabled` 写入）。
+     *
+     * 关闭时不创建音频编码器与 AudioRecord，也不起音频线程；
+     * [startMuxerIfReadyLocked] 因此只等视频轨，成片是单视频轨 fMP4。
+     */
+    private var audioEnabledThisRun = true
+
     private var sessionStartUs = 0L
     private var basePtsUs = -1L
 
@@ -135,7 +143,8 @@ class SegmentRecorder(private val context: Context) {
         bitrate: Int,
         orientation: Int,
         segmentSeconds: Int,
-        preHandover: PreRecordBuffer.Handover? = null
+        preHandover: PreRecordBuffer.Handover? = null,
+        audioEnabled: Boolean = true
     ): Surface? {
         synchronized(lock) {
             if (started) return null
@@ -147,6 +156,7 @@ class SegmentRecorder(private val context: Context) {
             pendingRealtimeVideo.clear()
             videoFormat = null
             audioFormat = null
+            audioEnabledThisRun = audioEnabled
             segmentDurationUs = segmentSeconds.coerceAtLeast(1) * US_PER_SECOND
             orientationHint = orientation
             // 必须用 CLOCK_BOOTTIME：相机帧时间戳（SENSOR_TIMESTAMP）就是这个时基。
@@ -196,21 +206,36 @@ class SegmentRecorder(private val context: Context) {
                 videoFormat = preHandover.videoFormat
                 surface = preHandover.videoSurface
                 // 音频用同样配置另起一套；交接的 AAC 帧由音频线程先写进新音轨
-                startAudioCodec()
+                if (audioEnabled) startAudioCodec()
                 synchronized(lock) { startMuxerIfReadyLocked() }
             } else {
                 surface = startVideoCodec(width, height, fps, bitrate)
-                startAudioCodec()
+                if (audioEnabled) startAudioCodec()
             }
             stopping = false
             started = true
             videoThread = thread(name = "bodycam-video-enc") { videoLoop() }
-            audioThread = thread(name = "bodycam-audio-enc") { audioLoop() }
+            if (audioEnabled) {
+                audioThread = thread(name = "bodycam-audio-enc") { audioLoop() }
+            }
             surface
         } catch (e: Exception) {
             Log.e(TAG, "start failed", e)
             releaseInternal()
             null
+        }
+    }
+
+    /**
+     * 运行期改分段时长：只影响下一个分段边界，当前正在写的分段照原计划收尾。
+     *
+     * 设置页改完立即生效（不必等下次开录）。判据在视频帧回调里，
+     * 所以新值比当前段已录时长还短时，下一个关键帧就会切段。
+     */
+    fun setSegmentSeconds(seconds: Int) {
+        val durationUs = seconds.coerceAtLeast(1) * US_PER_SECOND
+        synchronized(lock) {
+            segmentDurationUs = durationUs
         }
     }
 
@@ -585,12 +610,18 @@ class SegmentRecorder(private val context: Context) {
 
     private fun startMuxerIfReadyLocked() {
         val segment = muxer ?: return
-        if (segment.videoTrack >= 0 && segment.audioTrack >= 0) return
+        // 视频轨必须有；音频轨只在本次录制带声音时才等
+        val tracksReady = segment.videoTrack >= 0 &&
+                (!audioEnabledThisRun || segment.audioTrack >= 0)
+        if (tracksReady) return
         val vf = videoFormat ?: return
-        val af = audioFormat ?: return
+        // 关掉声音时不需要 audioFormat，否则会被它卡住不建轨
+        val af = if (audioEnabledThisRun) (audioFormat ?: return) else null
         try {
             if (segment.videoTrack < 0) segment.addVideoTrack(vf.toVideoFormat(orientationHint))
-            if (segment.audioTrack < 0) segment.addAudioTrack(af.toAudioFormat())
+            if (audioEnabledThisRun && af != null && segment.audioTrack < 0) {
+                segment.addAudioTrack(af.toAudioFormat())
+            }
         } catch (e: Exception) {
             Log.e(TAG, "start muxer failed", e)
             return
@@ -605,8 +636,10 @@ class SegmentRecorder(private val context: Context) {
             writeHandoverFramesLocked(frames)
             pendingVideoHandover = null
         }
+        // 本次录制不带声音时不写交接的 AAC 帧：预录可能是在「声音开」时启动的，
+        // 它的 Handover 里会带着音频帧，而此时根本没有音轨（track = -1）
         pendingAudioHandover?.let { frames ->
-            writeHandoverAudioLocked(frames)
+            if (audioEnabledThisRun) writeHandoverAudioLocked(frames)
             pendingAudioHandover = null
         }
     }

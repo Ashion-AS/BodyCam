@@ -35,9 +35,11 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 30 分钟自动分段 | `SegmentRecorder`：编码器不停，只在分段点换一个新的 fMP4 封装器 |
 | 循环录像 / 磁盘兜底 | `DiskGuard`：剩余空间低于阈值时删最早的已结束分段，或安全停录（见「八点十」） |
 | 低电量兜底 | `BatteryGuard`：电量低于阈值时提示，接近耗尽时安全停录；充电中不触发，息屏同样生效（见「八点十之二」） |
+| 录像参数可配 | 分辨率（4K/1080P/720P/D1，按设备能力回退）、帧率（15–60）、画质（高/中/低，码率自动换算）、分段时长（5–30 分钟）、视频声音开关，全部持久化（见「八点十二」） |
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
 | 预录开启提示 | 顶栏右侧**黄点**（`preRecordDot`），设置页可开关 |
+| 延录（关闭 / 5/10/15/30 秒可调） | 按下停止后再录 N 秒才收尾，编码器不中断、同文件同分段；倒计时可撤销（见「八点五之二」） |
 | 摄像头切换（前后摄 / 多后摄） | 顶栏切摄按钮循环切换，选择持久化；录像中禁止切换（见「六点六」） |
 | 补光 / 闪光灯 | 顶栏闪电按钮开常亮 torch（录像中也能切）；设置页选拍照补光策略（见「六点六」） |
 | 数字变焦 | 预览右侧竖向缩放条，拖动即改 `SCALER_CROP_REGION`；录像中也能调，拍照沿用同一视野（见「六点七」） |
@@ -573,6 +575,43 @@ btnIr.setOnClickListener {
 **与分段的配合**：交接后进入正常的 `SegmentRecorder` 流程，30 分钟切片规则不变，
 预录内容只出现在第一个分段里。
 
+## 八点五之二、延录（按下停止之后的画面与声音）
+
+预录抓的是「按键之前」，延录抓的是「按键之后」——执法场景里按停之后常还有要紧的几秒。
+
+**入口**：设置页「延录时长」（关闭 / 5 / 10 / 15 / 30 秒），默认 10 秒；设成「关闭」时
+按下停止立即停，行为与原来一致。
+
+**做法**（`MainActivity` 里的 `postRecording` / `postRecordEndElapsed`）：
+
+- 延录期间**编码器与 muxer 完全不动**，`recording` 保持 `true`，只是把「收尾」推迟
+  一个倒计时。所以延录段和主录像天然在同一个分段、同一个文件里，衔接处没有断点，
+  也不需要像预录那样重新交接编码器；
+- 倒计时由常驻 ticker 推进（`tickPostRecord()`），**息屏 / 后台同样生效**——
+  ticker 在 `recording` 为 true 时不受 `resumed` 影响；
+- 倒计时走完调用 `stopRecording()`，走与其他停录完全相同的收尾路径（排空编码器、写尾帧）。
+
+**三种交互**（缺一不可，否则用户会以为已经停了）：
+
+| 操作 | 结果 |
+| --- | --- |
+| 按下停止 | 进入延录，主界面提示条 + 通知栏显示剩余秒数 |
+| 延录中再按停止（含通知栏按钮） | `finishPostRecord()`，立即收尾 |
+| 延录中按提示条上的「继续录像」 | `cancelPostRecord()`，撤销这次停止，继续正常录像 |
+
+编码器从未中断，所以「继续录像」是零成本的——只是把状态抹掉。
+
+**提示位置**：
+
+- 主界面：顶栏下方一条提示条（`postRecordBar`），accent 色显示「延录中 N 秒」，
+  右侧「继续录像」可点；
+- 通知栏：正文换成「延录中，还剩 N 秒」，动作按钮改为「立即停止」；
+- 秒数变化时才推一次通知（`lastPostRecordNotifiedSec`），避免每 500ms notify。
+
+**与其他兜底的优先级**：延录期间磁盘/电量的**告警文案**让位给倒计时（最多几十秒，
+主界面仍有 ToastBar），但**强制停录线不受影响**——磁盘满或电量耗尽直接
+`stopRecording()`，绝不因延录而多录一秒导致文件写不完。
+
 ---
 
 ## 八点六、独立录音（只采声音，30 分钟一片）
@@ -939,6 +978,90 @@ patchMfra()              → 按新偏移追写 mfra 随机访问索引（八点
 
 ---
 
+## 八点十之二点五、录像参数设置（分辨率 / 帧率 / 画质 / 分段 / 声音）
+
+录像参数原本硬编码在 `AppConfig`，现在全部可配并持久化在 `SettingsStore`。
+
+| 项 | 档位 | 说明 |
+| --- | --- | --- |
+| 分辨率 | 4K / 1080P / 720P / D1 | 存**档位下标**，换机器后按面积就近回退 |
+| 帧率 | 15 / 20 / 25 / 30 / 60 | 直接进 `MediaFormat.KEY_FRAME_RATE` |
+| 画质 | 高 / 中 / 低 | 只调码率，不改变分辨率或帧率 |
+| 分段时长 | 5 / 10 / 15 / 20 / 30 分钟 | **即时生效**（每次切分段时读一次） |
+| 视频声音 | 开 / 关 | 关闭后不建音频编码器，成片只有视频轨 |
+
+### 分辨率为什么要改相机流尺寸
+
+录像输出尺寸 `videoW/videoH` 是从相机流尺寸 `streamW/streamH` 派生的：
+取 `streamW/streamH` 的短边/长边，竖屏输出 `短边×长边`（如 1080×1920），
+横屏反之。所以「把编码器配成 4K」是不够的——相机必须按 4K 出帧，否则
+编码器只是把 1080P 的画面放大到 4K，白白浪费码率。
+
+因此改分辨率要动三处，且只有重建相机会话才能生效：
+
+1. `CameraSpec.resolveVideoSize()` 从该摄像头支持的 `SurfaceTexture` 尺寸里
+   按面积就近挑一档（规则与 `resolvePhotoSize` 相同：同宽高比优先，再比面积差）；
+2. `SurfaceTexture.setDefaultBufferSize(streamW, streamH)` 跟着改，
+   否则相机会按旧尺寸出帧、画面被拉伸；
+3. `CameraController.restartPreview()` 重建会话，相机才会按新尺寸出帧。
+
+这三步封在 `MainActivity.applyVideoSettings()` 里。切摄像头走的是同一条
+重建路径（`switchCamera`），所以前后摄各自按自己支持的档位回退。
+
+### 生效时机
+
+| 项 | 何时生效 | 原因 |
+| --- | --- | --- |
+| 分辨率 | 下次开始录像（或停录后立即） | 要重建相机会话，录像中不能动 |
+| 帧率 / 画质 | 下次开始录像 | 编码器在 `start()` 时配置，中途不能改 |
+| 分段时长 | 即时 | `setSegmentSeconds()` 改 `segmentDurationUs`，下一个关键帧切段 |
+| 视频声音 | 下次开始录像 | 音频编码器只在 `start()` 时创建 |
+
+录像期间改了分辨率不会丢设置：`applyVideoSettings()` 里重建相机会话的部分
+在 `recording || savingSegment` 时跳过，停录回调 `onSegmentSaved()` 里再应用一次；
+分段时长则在录像中也走 `recorder.setSegmentSeconds()` 立即生效。
+
+### 码率怎么算
+
+码率不写死，按「分辨率 × 帧率 × 每像素每帧比特数」现算，再向下取整到 0.5Mbps：
+
+```kotlin
+fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
+    val bpp = QUALITY_BPP[quality]              // 0.10 / 0.06 / 0.035
+    val raw = (width.toLong() * height * fps * bpp).toLong()
+    val clamped = raw.coerceIn(1_000_000L, 60_000_000L)
+    return ((clamped / 500_000L) * 500_000L).toInt()
+}
+```
+
+实测换算（30fps）：
+
+| 分辨率 | 高 | 中 | 低 |
+| --- | --- | --- | --- |
+| 4K | 24.5 Mbps | 14.5 Mbps | 8.5 Mbps |
+| 1080P | 6.0 Mbps | 3.5 Mbps | 2.0 Mbps |
+| 720P | 2.5 Mbps | 1.5 Mbps | 1.0 Mbps |
+| D1 | 1.0 Mbps | 1.0 Mbps | 1.0 Mbps |
+
+> 不写死常数的原因：4K 用 1080P 的码率会糊成一片，720P 用 4K 的码率只是白白
+> 占空间。BPP 系数是 H.264 的常见取值，需要按机器实际表现调就改 `QUALITY_BPP`。
+
+### 视频声音关掉时
+
+`SegmentRecorder.start()` 多了一个 `audioEnabled` 参数（默认 true）：
+
+- 不创建音频编码器与 `AudioRecord`，也不起音频线程；
+- `startMuxerIfReadyLocked()` 只等视频轨就绪，成片是单视频轨 fMP4；
+- 预录交接的 AAC 帧在 `flushHandoverLocked()` 里按 `audioEnabledThisRun` 跳过
+  ——预录可能是「声音开」时启动的，`Handover` 里会带着音频帧，而本次录制没有音轨；
+- 预录启动时也跟随这个开关（`withAudio = params.audio`），不采无用音频；
+- 停录后的「麦克风没录到声音」提示只在声音开着时才弹。
+
+录音功能（`AudioRecorder` / `AudioRecordActivity`）完全不受影响，
+它用的是 `CodecSupport.kt` 里的独立常量。
+
+---
+
 ## 八点十一、提示条（`ui/ToastBar`）
 
 全应用的文字提示统一走 `ui/ToastBar`，不再用系统 `Toast`。
@@ -977,9 +1100,11 @@ patchMfra()              → 按新偏移追写 mfra 随机访问索引（八点
 
 | 参数 | 说明 |
 | --- | --- |
-| `SEGMENT_SECONDS` | 分段长度，默认 `30 * 60`；调成 8 秒即可快速验证切片 |
-| `AUDIO_SEGMENT_SECONDS` | 录音分段长度，默认 `30 * 60`；同样可调小验证 |
-| `VIDEO_FPS` / `VIDEO_BITRATE` | 帧率与码率（默认 30fps / 12Mbps） |
+| `SEGMENT_MINUTE_OPTIONS` | 录像分段时长档位（5 / 10 / 15 / 20 / 30 分钟），存的是分钟数 |
+| `AUDIO_SEGMENT_SECONDS` | 录音分段长度，默认 `30 * 60`；调成 8 秒即可快速验证切片 |
+| `DEFAULT_VIDEO_FPS` / `DEFAULT_SEGMENT_MINUTES` | 录像帧率与分段时长的默认值；实际值以设置页为准 |
+| `videoSizeOptions()` / `VIDEO_SIZE_LABELS` | 录像分辨率四档（4K / 1080P / 720P / D1），存的是档位下标 |
+| `VIDEO_QUALITY_HIGH/MEDIUM/LOW` | 画质档对应的每像素每帧比特数（0.10 / 0.06 / 0.035） |
 | `AUDIO_SILENT_THRESHOLD` | 录音峰值低于此值提示「基本没录到声音」（默认 50 / 满量程 32767） |
 | `WATERMARK_WIDTH` | 水印宽度占画面比例（0.60） |
 | `WATERMARK_LEFT` / `WATERMARK_BOTTOM` | 水印左下角边距（0.045 / 0.045） |
@@ -1048,8 +1173,8 @@ patchMfra()              → 按新偏移追写 mfra 随机访问索引（八点
   ```bash
   adb logcat -s BodyCamGL BodyCamJNI SegmentRecorder PreRecordBuffer
   ```
-- 验证分段：把 `AppConfig.SEGMENT_SECONDS` 临时改成 8，录 30 秒，`adb pull` 后应该
-  得到 3~4 个 `partNN.mp4`，每个都能单独播放。
+- 验证分段：设置页把「分段时长」选成 5 分钟（或临时把 `DEFAULT_SEGMENT_MINUTES` 改成 1），
+  录够时间后 `adb pull` 应得到多个 `partNN.mp4`，每个都能单独播放。
 - 验证录音分段：把 `AppConfig.AUDIO_SEGMENT_SECONDS` 临时改成 8，在录音页录 20 秒，
   `adb pull` 后应得到 2~3 个 `AUD_...partNN.m4a`，每个都能单独播放；录音页波形应随
   说话明显起伏、静音时回落到基线。

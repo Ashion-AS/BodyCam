@@ -13,6 +13,7 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.media.ImageReader
+import android.media.MediaCodecList
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -42,9 +43,51 @@ data class CameraSpec(
     /** 最大数字变焦倍率；1 表示该摄像头不支持缩放（缩放条应隐藏） */
     val zoomMax: Float = 1f,
     /** 该摄像头支持的全部 JPEG 输出尺寸，用于按设置档位挑选/回退 */
-    val jpegSizes: List<Size> = emptyList()
+    val jpegSizes: List<Size> = emptyList(),
+    /** 该摄像头支持的全部 SurfaceTexture 输出尺寸，用于按设置档位挑选/回退 */
+    val videoSizes: List<Size> = emptyList(),
+    /**
+     * 视频编码器（H.264）支持的最大宽×高。
+     *
+     * 相机能出 4K 不代表编码器能编 4K（低端设备常见），
+     * 挑档位时要同时满足两者，否则开录时 `codec.configure` 会直接抛异常。
+     */
+    val encoderMaxW: Int = 0,
+    val encoderMaxH: Int = 0
 ) {
     val isFront: Boolean get() = lensFacing == CameraCharacteristics.LENS_FACING_FRONT
+
+    /**
+     * 按设置档位的目标像素挑一个实际可用的视频流尺寸。
+     *
+     * 与 [resolvePhotoSize] 同一套规则，但输入用长边/短边而不是直接的宽高：
+     * 设置页给的是「3840×2160」，而相机上报的尺寸永远是传感器方向
+     * （横屏的 3840×2160），输出侧再按屏幕姿态交换，所以这里只比面积与比例。
+     *  1. 精确命中就用它；
+     *  2. 否则在同一宽高比（16:9）里取面积最接近的；
+     *  3. 再否则在全量列表里取面积最接近的。
+     */
+    fun resolveVideoSize(targetLong: Int, targetShort: Int): Size {
+        if (videoSizes.isEmpty()) return videoSize
+        // 编码器编不动的大尺寸先剔掉：宁可降档也不要开录即失败
+        val encodable = encodableSizes(videoSizes)
+        if (encodable.isEmpty()) return videoSize
+        val targetArea = targetLong.toLong() * targetShort
+        val sameRatio = encodable.filter { it.width * targetShort == it.height * targetLong }
+        val pool = sameRatio.ifEmpty { encodable }
+        return pool.minByOrNull { kotlin.math.abs(it.width.toLong() * it.height - targetArea) }
+            ?: videoSize
+    }
+
+    /**
+     * 过滤掉编码器编不动的尺寸；没有编码器上限信息时原样返回。
+     *
+     * 相机能出某个尺寸 ≠ 编码器能编，两者取交集才算真正可用的档位。
+     */
+    private fun encodableSizes(sizes: List<Size>): List<Size> {
+        if (encoderMaxW <= 0 || encoderMaxH <= 0) return sizes
+        return sizes.filter { it.width <= encoderMaxW && it.height <= encoderMaxH }
+    }
 
     /**
      * 按设置档位的目标像素挑一个实际可用的 JPEG 尺寸。
@@ -599,7 +642,8 @@ class CameraController(
                 val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                     ?: return null
                 val videoSizes = map.getOutputSizes(SurfaceTexture::class.java) ?: return null
-                val videoSize = chooseVideoSize(videoSizes)
+                val enc = encoderMaxSize()
+                val videoSize = chooseVideoSize(videoSizes, enc)
                 val jpegSizes = map.getOutputSizes(ImageFormat.JPEG) ?: emptyArray()
                 val photoSize = choosePhotoSize(jpegSizes, videoSize)
                 val sensor = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
@@ -624,7 +668,10 @@ class CameraController(
                     activeArray = characteristics.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
                         ?: Rect(),
                     zoomMax = zoomMax,
-                    jpegSizes = jpegSizes.toList()
+                    jpegSizes = jpegSizes.toList(),
+                    videoSizes = videoSizes.toList(),
+                    encoderMaxW = enc?.width ?: 0,
+                    encoderMaxH = enc?.height ?: 0
                 )
             } catch (e: Exception) {
                 null
@@ -632,16 +679,49 @@ class CameraController(
         }
 
         /** 优先 1080p，其次 16:9 且不超过 1080p 的最大尺寸 */
-        private fun chooseVideoSize(sizes: Array<Size>): Size {
-            sizes.firstOrNull { it.width == 1920 && it.height == 1080 }?.let { return it }
+        private fun chooseVideoSize(sizes: Array<Size>, encodable: Size?): Size {
+            // 编码器编不动的尺寸直接排除，否则会挑到开录即失败的档位
+            val usable = if (encodable != null) {
+                sizes.filter { it.width <= encodable.width && it.height <= encodable.height }
+                    .ifEmpty { sizes.toList() }
+            } else sizes.toList()
+            usable.firstOrNull { it.width == 1920 && it.height == 1080 }?.let { return it }
             val target = 1920 * 1080
-            val sixteenNine = sizes.filter { it.width * 9 == it.height * 16 }
-            val pool = if (sixteenNine.isNotEmpty()) sixteenNine else sizes.toList()
+            val sixteenNine = usable.filter { it.width * 9 == it.height * 16 }
+            val pool = if (sixteenNine.isNotEmpty()) sixteenNine else usable
             return pool.filter { it.width.toLong() * it.height <= target }
                 .maxByOrNull { it.width * it.height }
                 ?: pool.minByOrNull { it.width * it.height }
-                ?: sizes[0]
+                ?: usable[0]
         }
+
+        /**
+         * 查 H.264 硬件编码器支持的最大宽×高；查不到返回 null（按不限制处理）。
+         *
+         * 取所有 AVC 编码器能力的上限：设备上常有多个实现（硬编 + 软编），
+         * 只要有一个编得动，`MediaCodec.createEncoderByType` 就有机会选中它。
+         * 编码器能力跟摄像头无关，缓存一次即可（枚举 camera 时会按每颗调进来）。
+         */
+        private val encoderMaxSizeCache: Size? by lazy {
+            try {
+                var bestW = 0
+                var bestH = 0
+                for (info in MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos) {
+                    if (!info.isEncoder) continue
+                    if (info.supportedTypes.none { it.equals("video/avc", ignoreCase = true) }) continue
+                    val caps = runCatching { info.getCapabilitiesForType("video/avc") }.getOrNull()
+                        ?: continue
+                    val vc = runCatching { caps.videoCapabilities }.getOrNull() ?: continue
+                    bestW = maxOf(bestW, vc.supportedWidths.upper)
+                    bestH = maxOf(bestH, vc.supportedHeights.upper)
+                }
+                if (bestW > 0 && bestH > 0) Size(bestW, bestH) else null
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        private fun encoderMaxSize(): Size? = encoderMaxSizeCache
 
         /** 拍照尺寸尽量跟视频同比例，避免预览/照片畸变 */
         private fun choosePhotoSize(sizes: Array<Size>, video: Size): Size {
