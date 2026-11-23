@@ -45,6 +45,7 @@ object SettingsStore {
     private const val KEY_VIDEO_FPS = "video_fps"
     private const val KEY_VIDEO_QUALITY = "video_quality"
     private const val KEY_SEGMENT_MINUTES = "segment_minutes"
+    private const val KEY_AUDIO_SEGMENT_MINUTES = "audio_segment_minutes"
     private const val KEY_VIDEO_AUDIO = "video_audio"
 
     /** 预录时长可选项 */
@@ -266,6 +267,22 @@ object SettingsStore {
 
     fun setSegmentMinutes(context: Context, minutes: Int) {
         prefs(context).edit().putInt(KEY_SEGMENT_MINUTES, minutes).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /**
+     * 录音分段时长（分钟），与录像的分段时长互不影响。
+     * 录音启动时换算成秒传给 [com.dsh.bodycam.record.AudioRecorder]。
+     */
+    fun audioSegmentMinutes(context: Context): Int {
+        val v = prefs(context)
+            .getInt(KEY_AUDIO_SEGMENT_MINUTES, AppConfig.DEFAULT_SEGMENT_MINUTES)
+        // 档位外的旧值按默认档处理，避免录出一个 0 分钟的分段
+        return if (v in AppConfig.SEGMENT_MINUTE_OPTIONS) v else AppConfig.DEFAULT_SEGMENT_MINUTES
+    }
+
+    fun setAudioSegmentMinutes(context: Context, minutes: Int) {
+        prefs(context).edit().putInt(KEY_AUDIO_SEGMENT_MINUTES, minutes).apply()
         listener?.onSettingsChanged()
     }
 

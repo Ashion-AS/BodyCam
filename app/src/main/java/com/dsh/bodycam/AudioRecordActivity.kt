@@ -221,7 +221,7 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
             requestAudioPermissionIfNeeded()
             return
         }
-        if (!rec.start()) {
+        if (!rec.start(SettingsStore.audioSegmentMinutes(this) * 60)) {
             toast(getString(R.string.audio_start_failed))
             return
         }

@@ -88,10 +88,11 @@ object AppConfig {
     const val DEFAULT_SEGMENT_MINUTES = 30
 
     /**
-     * 录音分段长度（秒）。到点后编码器不中断，只换一个新的 muxer 继续写，
+     * 录音分段长度（秒）的默认值。到点后编码器不中断，只换一个新的 muxer 继续写，
      * 所以分段处不打断录音，只在文件边界切一刀（最多丢约一帧 AAC）。
+     * 运行期以设置页选择为准（持久化在 [SettingsStore]），这里是默认值。
      */
-    const val AUDIO_SEGMENT_SECONDS = 30 * 60
+    const val DEFAULT_AUDIO_SEGMENT_SECONDS = 30 * 60
 
     /** true = 常亮；执法记录仪一般设为 false，让屏幕可以自动熄灭继续录 */
     const val KEEP_SCREEN_ON = false

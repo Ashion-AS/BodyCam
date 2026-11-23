@@ -28,6 +28,7 @@ class SettingsActivity : Activity() {
     private lateinit var rgVideoFps: RadioGroup
     private lateinit var rgVideoQuality: RadioGroup
     private lateinit var llSegmentMinutes: LinearLayout
+    private lateinit var llAudioSegmentMinutes: LinearLayout
     private lateinit var swVideoAudio: Switch
     private lateinit var rgPhotoFlash: RadioGroup
     private lateinit var rgPhotoMode: RadioGroup
@@ -57,6 +58,7 @@ class SettingsActivity : Activity() {
         rgVideoFps = findViewById(R.id.rgVideoFps)
         rgVideoQuality = findViewById(R.id.rgVideoQuality)
         llSegmentMinutes = findViewById(R.id.llSegmentMinutes)
+        llAudioSegmentMinutes = findViewById(R.id.llAudioSegmentMinutes)
         swVideoAudio = findViewById(R.id.swVideoAudio)
         rgPhotoFlash = findViewById(R.id.rgPhotoFlash)
         rgPhotoMode = findViewById(R.id.rgPhotoMode)
@@ -104,6 +106,7 @@ class SettingsActivity : Activity() {
         buildDiskWarnOptions()
         buildBatteryWarnOptions()
         buildVideoOptions()
+        buildAudioOptions()
         updateSections()
     }
 
@@ -433,6 +436,23 @@ class SettingsActivity : Activity() {
         swVideoAudio.isChecked = SettingsStore.isVideoAudioEnabled(this)
         swVideoAudio.setOnCheckedChangeListener { _, checked ->
             SettingsStore.setVideoAudioEnabled(this, checked)
+        }
+    }
+
+    /**
+     * 录音分段时长，档位与录像共用 [AppConfig.SEGMENT_MINUTE_OPTIONS]，
+     * 但持久化在独立的 key 上（[SettingsStore.audioSegmentMinutes]），两处互不影响。
+     */
+    private fun buildAudioOptions() {
+        val segments = AppConfig.SEGMENT_MINUTE_OPTIONS.map {
+            getString(R.string.settings_segment_fmt, it)
+        }
+        buildOptionGrid(
+            llAudioSegmentMinutes, segments,
+            AppConfig.SEGMENT_MINUTE_OPTIONS.indexOf(SettingsStore.audioSegmentMinutes(this)),
+            columns = 4
+        ) { index ->
+            SettingsStore.setAudioSegmentMinutes(this, AppConfig.SEGMENT_MINUTE_OPTIONS[index])
         }
     }
 

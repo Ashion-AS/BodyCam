@@ -6,6 +6,7 @@
     <string name="settings_section_encode">编码设置</string>
     <string name="settings_section_record">录像设置</string>
     <string name="settings_section_photo">拍照设置</string>
+    <string name="settings_section_audio">录音设置</string>
     <string name="settings_section_other">其他</string>
     <string name="settings_pre_record_title">预录功能</string>
     <string name="settings_pre_record_summary">开始录像前持续缓存画面与声音；开启后耗电与内存占用会增加</string>
@@ -73,6 +74,7 @@
     <string name="settings_segment_title">分段时长</string>
     <string name="settings_segment_fmt">%1$d 分钟</string>
     <string name="settings_segment_summary">每隔这么久换一个新文件；切换在关键帧处进行，不丢画面</string>
+    <string name="settings_audio_segment_summary">每隔这么久换一个录音文件；切换时编码器不中断，只在文件边界切一刀</string>
     <string name="settings_video_audio_title">视频声音</string>
     <string name="settings_video_audio_summary">关闭后录像不带声音，文件里只有视频轨；录音功能不受影响</string>
     <string name="settings_video_next_run_hint">分辨率、帧率与画质在下次开始录像时生效</string>

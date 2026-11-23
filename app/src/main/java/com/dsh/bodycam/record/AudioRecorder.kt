@@ -60,7 +60,7 @@ class AudioRecorder(private val context: Context) {
     private var audioFormat: MediaFormat? = null
 
     /** 分段时长与序号；PTS 相对每段起点重新计算，保证单文件内从 0 单调递增 */
-    private var segmentDurationUs = AppConfig.AUDIO_SEGMENT_SECONDS * US_PER_SECOND
+    private var segmentDurationUs = AppConfig.DEFAULT_AUDIO_SEGMENT_SECONDS * US_PER_SECOND
     private var segmentIndex = 0
     private var nameBase = ""
     private var ptsBaseUs = 0L
@@ -91,10 +91,10 @@ class AudioRecorder(private val context: Context) {
 
     /**
      * 开始录音。
-     * @param segmentSeconds 单个文件的分段时长（秒），默认 [AppConfig.AUDIO_SEGMENT_SECONDS]。
+     * @param segmentSeconds 单个文件的分段时长（秒），默认 [AppConfig.DEFAULT_AUDIO_SEGMENT_SECONDS]。
      * @return 权限不足或初始化失败返回 false，失败时已建资源释放干净。
      */
-    fun start(segmentSeconds: Int = AppConfig.AUDIO_SEGMENT_SECONDS): Boolean {
+    fun start(segmentSeconds: Int = AppConfig.DEFAULT_AUDIO_SEGMENT_SECONDS): Boolean {
         synchronized(lock) {
             if (running) return false
             entries.clear()
