@@ -65,17 +65,31 @@ class GlPipeline(val videoWidth: Int, val videoHeight: Int) {
         if (available) WatermarkEngine.nativeSetRecording(handle, recording)
     }
 
+    /**
+     * 更新一块水印（四角各一个 slot）。
+     *
+     * @param anchorLeft true = leftFrac 是左边界；false = leftFrac 是右边界
+     * @param anchorBottom true = bottomFrac 是下边界；false = bottomFrac 是上边界
+     */
     fun setWatermark(
+        slot: Int,
         bitmap: Bitmap,
         leftFrac: Float,
         bottomFrac: Float,
-        widthFrac: Float
+        widthFrac: Float,
+        anchorLeft: Boolean,
+        anchorBottom: Boolean
     ) {
         if (available) {
             WatermarkEngine.nativeSetWatermark(
-                handle, bitmap, leftFrac, bottomFrac, widthFrac
+                handle, slot, bitmap, leftFrac, bottomFrac, widthFrac, anchorLeft, anchorBottom
             )
         }
+    }
+
+    /** 清空某一块水印（该角没有内容） */
+    fun clearWatermark(slot: Int) {
+        if (available) WatermarkEngine.nativeClearWatermark(handle, slot)
     }
 
     /** 画面方向（0/90/180/270）：只转纹理坐标，画幅尺寸由调用方同步交换 */

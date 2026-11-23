@@ -64,9 +64,23 @@ public:
      */
     void setPreRecordWindow(ANativeWindow* window);
 
-    /** 更新水印：像素为 RGBA_8888 预乘 alpha */
-    void setWatermarkPixels(std::vector<uint8_t> pixels, int width, int height,
-                            float leftFrac, float bottomFrac, float widthFrac);
+    /**
+     * 更新某一块水印：像素为 RGBA_8888 预乘 alpha。
+     *
+     * @param slot 水印槽号（0~3），四角各一块；同一槽重复调用即覆盖。
+     * @param leftFrac/bottomFrac 该块左下角相对画面的位置（0~1）
+     * @param widthFrac 该块宽度占画面宽度的比例
+     * @param anchorLeft true = 按 leftFrac 从左边对齐，false = 按 leftFrac 作为
+     *                   右边界对齐（用于右上/右下角）
+     * @param anchorBottom true = 按 bottomFrac 从底边对齐，false = 按 bottomFrac
+     *                   作为上边界对齐（用于左上/右上角）
+     */
+    void setWatermarkPixels(int slot, std::vector<uint8_t> pixels, int width, int height,
+                            float leftFrac, float bottomFrac, float widthFrac,
+                            bool anchorLeft, bool anchorBottom);
+
+    /** 清空某一块水印（该角没有内容时调用） */
+    void clearWatermark(int slot);
 
     /**
      * 画面方向（度，0/90/180/270）。
@@ -132,15 +146,42 @@ private:
     int wmTexW_ = 0;
     int wmTexH_ = 0;
 
-    // ---- 待上传的水印位图 ----
+    /**
+     * 四角水印槽，各自独立的纹理与位置。
+     *
+     * 用固定 4 个槽而不是动态容器：角数本来就是固定的（左上/右上/左下/右下），
+     * 槽号直接由 Java 侧枚举映射过来，省掉查找与内存分配。
+     */
+    static constexpr int WM_SLOTS = 4;
+
+    struct WatermarkSlot {
+        GLuint tex = 0;
+        int texW = 0;
+        int texH = 0;
+        float leftFrac = 0.0f;
+        float bottomFrac = 0.0f;
+        float widthFrac = 0.4f;
+        bool anchorLeft = true;
+        bool anchorBottom = true;
+        bool present = false;
+    };
+    WatermarkSlot wmSlots_[WM_SLOTS];
+
+    /** 待上传的位图（主线程写入，渲染线程消费），与槽一一对应 */
+    struct PendingWatermark {
+        std::vector<uint8_t> pixels;
+        int width = 0;
+        int height = 0;
+        float leftFrac = 0.0f;
+        float bottomFrac = 0.0f;
+        float widthFrac = 0.4f;
+        bool anchorLeft = true;
+        bool anchorBottom = true;
+        bool present = false;
+        bool dirty = false;
+    };
     std::mutex wmMutex_;
-    std::vector<uint8_t> wmPixels_;
-    int wmPixelW_ = 0;
-    int wmPixelH_ = 0;
-    float wmLeftFrac_ = 0.0f;
-    float wmBottomFrac_ = 0.0f;
-    float wmWidthFrac_ = 0.5f;
-    bool wmDirty_ = false;
+    PendingWatermark wmPending_[WM_SLOTS];
 
     /** 画面旋转角度，0/90/180/270（作用在纹理坐标上） */
     float rotationDeg_ = 0.0f;

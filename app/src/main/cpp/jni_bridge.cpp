@@ -128,9 +128,11 @@ Java_com_dsh_bodycam_gl_WatermarkEngine_nativeSetRecording(JNIEnv* /*env*/, jobj
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_dsh_bodycam_gl_WatermarkEngine_nativeSetWatermark(JNIEnv* env, jobject /*thiz*/,
-                                                           jlong handle, jobject bitmap,
+                                                           jlong handle, jint slot, jobject bitmap,
                                                            jfloat leftFrac, jfloat bottomFrac,
-                                                           jfloat widthFrac) {
+                                                           jfloat widthFrac,
+                                                           jboolean anchorLeft,
+                                                           jboolean anchorBottom) {
     GlRenderer* r = toRenderer(handle);
     if (!r || !bitmap) return;
 
@@ -151,8 +153,16 @@ Java_com_dsh_bodycam_gl_WatermarkEngine_nativeSetWatermark(JNIEnv* env, jobject 
     }
     AndroidBitmap_unlockPixels(env, bitmap);
 
-    r->setWatermarkPixels(std::move(data), static_cast<int>(info.width),
-                          static_cast<int>(info.height), leftFrac, bottomFrac, widthFrac);
+    r->setWatermarkPixels(static_cast<int>(slot), std::move(data),
+                          static_cast<int>(info.width), static_cast<int>(info.height),
+                          leftFrac, bottomFrac, widthFrac,
+                          anchorLeft == JNI_TRUE, anchorBottom == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_dsh_bodycam_gl_WatermarkEngine_nativeClearWatermark(JNIEnv* /*env*/, jobject /*thiz*/,
+                                                             jlong handle, jint slot) {
+    if (GlRenderer* r = toRenderer(handle)) r->clearWatermark(static_cast<int>(slot));
 }
 
 extern "C" JNIEXPORT void JNICALL

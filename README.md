@@ -17,8 +17,8 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
   <img src="docs/settings.png" width="300" alt="设置页">
 </p>
 
-> 左：实时预览（水印左下角，可用下方按钮或配置的外接触发操作）；
-> 右：设置页，预录、循环录像、拍照与补光等开关都在这里。
+> 左：实时预览（水印四角烧在成片里，可用下方按钮或配置的外接触发操作）；
+> 右：设置页，预录、循环录像、拍照、水印与补光等开关都在这里。
 
 ---
 
@@ -125,6 +125,7 @@ app/src/main/
 │   ├── util/DiskGuard.kt            # 剩余空间检查 + 循环录像清理（只删 BodyCam/Video 下的 VID_ 分段）
 │   ├── util/BatteryGuard.kt         # 电量两级阈值检查（告警 / 安全停录），充电中一律视为正常
 │   ├── util/VideoCrypto.kt          # 录像文件 AES-256-GCM 分块加解密（见「八点十之二点七」）
+│   ├── util/DeviceSerial.kt         # 读真实设备 SN（SystemProperties → getSerial → ANDROID_ID 逐级回退）
 │   └── util/Storage.kt              # 文件落盘 + 文件页的目录枚举（list）
 └── res/                             # 布局（主界面/设置页/文件页/查看页）、主题、图标、无障碍配置
 ```
@@ -259,13 +260,29 @@ Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写�
 
 ## 六、视频水印与功耗
 
-- 水印内容：`日期 时间` / `GPS 经纬度与精度` / `REC 时长 + 设备编号`。
-- 由 `WatermarkPainter` 用 Canvas 画成 ARGB_8888 位图（宽度 = 画面宽度 60%），
-  **每秒重画一次**，通过 JNI 传给 GL 线程上传为纹理。
+- 水印布局：四个角各自独立，内容可在设置页按角配置（经纬度 / 日期时间 /
+  SN + 录像状态 / 分组 + 用户名 / 不显示），默认是
+  左上经纬度、右上时间、左下 SN + 录像状态、右下分组 + 用户名。
+- SN 取的是**真实设备 SN**（`util/DeviceSerial`）：依次尝试系统属性
+  `ro.serialno` / `ro.boot.serialno` / `persist.sys.serialno`，再退到
+  `Build.getSerial()`，最后退到 `ANDROID_ID`；结果缓存一次。
+  Android 8.0+ 普通应用读不到 `Build.SERIAL`、API 29+ 读不到 `getSerial()`，
+  所以定制 ROM 上能否拿到出厂 SN 取决于属性是否可读。
+- 经纬度格式为 `N 22.543096  E 114.057865`（不带度数符号、不带精度米数）。
+- 由 `WatermarkPainter.renderAll` 一次出四张 ARGB_8888 位图（一个角一张），
+  **四角共用同一个字号**（首选为画幅宽度的 3.4%，不加粗，白色 + 阴影）；
+  同一行左右两块放不下时整体等比缩小字号，不会出现「某角字大、某角字小」。
+  按角缓存位图、宽度取文本实测值，所以数字变化不会反复重建；
+  右侧两角用 `Paint.Align.RIGHT` 真正右对齐，位图右边缘即画面右边缘。
+- **每 500ms 重画一次**，通过 JNI 传给 GL 线程上传为纹理（`WM_SLOTS = 4` 个槽，
+  每槽一套纹理与位置）。
   刷新由 `MainActivity` 的 ticker 驱动，条件是「界面可见 **或** 正在录像」：
   息屏后 `onPause` 会置 `resumed = false`，但录像仍在继续、渲染线程仍在给
   编码器出帧，所以必须继续重画，否则成片里的时间与 `REC` 计时会冻结在息屏那一刻。
-- GL 侧用 4 个顶点画一个带旋转的四边形，混合方式为预乘 alpha
+- 每个槽按 `anchorLeft` / `anchorBottom` 决定从哪条边对齐：左上/左下用左边界，
+  右上/右下用右边界；上排用上边界，下排用下边界。边距横向取画面宽度的 2%，
+  纵向换算成等效像素比例，保证竖屏时四边留白一致。
+- GL 侧每个槽各画一个四边形，混合方式为预乘 alpha
   （`GL_ONE, GL_ONE_MINUS_SRC_ALPHA`），不产生离屏 FBO、不做回读。
 - **方向只在纹理坐标上旋转**：几何顶点始终铺满视口，所以竖屏时把 16:9 的画面
   转 90° 填进 9:16 的帧里，像素不会被拉扁（早期版本旋转顶点，在非正方形视口里
@@ -515,13 +532,14 @@ btnIr.setOnClickListener {
 1. 解码后仍是横向像素（`w > h`）→ 说明设备没转，按 `R` 转 90/270；
 2. 解码后已经是竖向 → 说明设备已经转过，不再转（否则会转 180°）；
 3. `R` 为 180 时直接转 180，`R` 为 0 时不动；
-4. 在转正后的画面上按与视频相同的比例叠水印，再重新编码成 JPEG（质量 92），
+4. 在转正后的画面上按与视频相同的四角布局叠水印，再重新编码成 JPEG（质量 92），
    不保留原 EXIF —— 像素已经真正转正，留着标签会被播放器再转一次。
 
 代价是每张照片一次 decode + encode（几十到一百多毫秒），在独立的单线程池里做，
 不阻塞预览和录像。照片边长超过 4096 会自动降采样，控制内存峰值。
 
-水印内容里的 `REC 00:00:12` 是拍照那一刻的录制时长，`STANDBY` 表示没在录像。
+水印内容里的 `REC 00:00:12` 是拍照那一刻的录制时长，`未录像` 表示没在录像。
+四个角的布局与视频完全一致（同一套 `WatermarkPainter.renderAll`、同一字号）。
 
 ---
 
@@ -1171,9 +1189,7 @@ chunk* N 个块           每块 = IV(12B) || 密文(≤64KB) || Tag(16B)
 | `videoSizeOptions()` / `VIDEO_SIZE_LABELS` | 录像分辨率四档（4K / 1080P / 720P / D1），存的是档位下标 |
 | `VIDEO_QUALITY_HIGH/MEDIUM/LOW` | 画质档对应的每像素每帧比特数（0.10 / 0.06 / 0.035） |
 | `AUDIO_SILENT_THRESHOLD` | 录音峰值低于此值提示「基本没录到声音」（默认 50 / 满量程 32767） |
-| `WATERMARK_WIDTH` | 水印宽度占画面比例（0.60） |
-| `WATERMARK_LEFT` / `WATERMARK_BOTTOM` | 水印左下角边距（0.045 / 0.045） |
-| `DEVICE_ID` | 水印上的设备编号，可改成警号 |
+| `WATERMARK_MARGIN` | 水印四角的边距，占画面宽度的比例（0.02） |
 | `KEEP_SCREEN_ON` | true 则常亮；默认 false，允许息屏继续录 |
 | `DEBUG_OVERLAY` | 调试校准行（`S/D/R` 与流/输出尺寸）的**默认**显示状态；默认 false，实际以设置页开关为准 |
 | `ROTATION_OVERRIDE` | 强制旋转角，`-1` 为自动；真机方向差 90° 时填相反角度 |

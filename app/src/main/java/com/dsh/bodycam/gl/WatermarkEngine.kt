@@ -26,11 +26,15 @@ object WatermarkEngine {
     external fun nativeSetRecording(handle: Long, recording: Boolean)
     external fun nativeSetWatermark(
         handle: Long,
+        slot: Int,
         bitmap: Bitmap,
         leftFrac: Float,
         bottomFrac: Float,
-        widthFrac: Float
+        widthFrac: Float,
+        anchorLeft: Boolean,
+        anchorBottom: Boolean
     )
+    external fun nativeClearWatermark(handle: Long, slot: Int)
     external fun nativeSetRotation(handle: Long, degrees: Float)
     external fun nativeOnFrameAvailable(handle: Long)
     external fun nativeRelease(handle: Long)

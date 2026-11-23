@@ -838,6 +838,156 @@
                     android:text="@string/settings_audio_segment_summary" />
             </LinearLayout>
 
+            <!-- ==================== 水印 ==================== -->
+
+            <TextView
+                style="@style/BodyCamSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingTop="@dimen/space_lg"
+                android:paddingBottom="@dimen/space_xs"
+                android:text="@string/settings_section_watermark" />
+
+            <!-- 行 20：四角内容 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_watermark_corners_title" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_watermark_corners_summary" />
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/settings_watermark_top_left" />
+
+                <LinearLayout
+                    android:id="@+id/llWmTopLeft"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:orientation="vertical" />
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/settings_watermark_top_right" />
+
+                <LinearLayout
+                    android:id="@+id/llWmTopRight"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:orientation="vertical" />
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/settings_watermark_bottom_left" />
+
+                <LinearLayout
+                    android:id="@+id/llWmBottomLeft"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:orientation="vertical" />
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/settings_watermark_bottom_right" />
+
+                <LinearLayout
+                    android:id="@+id/llWmBottomRight"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:orientation="vertical" />
+            </LinearLayout>
+
+            <!-- 行 21：右下角分组名/用户名 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_watermark_group_title" />
+
+                <EditText
+                    android:id="@+id/etWmGroupName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:background="@drawable/bg_pre_record_option"
+                    android:hint="@string/settings_watermark_group_hint"
+                    android:imeOptions="actionDone"
+                    android:inputType="text"
+                    android:minHeight="@dimen/touch_target"
+                    android:paddingHorizontal="@dimen/space_sm"
+                    android:textColor="@color/ink"
+                    android:textColorHint="@color/muted"
+                    android:textSize="@dimen/text_md" />
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:text="@string/settings_watermark_user_title" />
+
+                <EditText
+                    android:id="@+id/etWmUserName"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:background="@drawable/bg_pre_record_option"
+                    android:hint="@string/settings_watermark_user_hint"
+                    android:imeOptions="actionDone"
+                    android:inputType="text"
+                    android:minHeight="@dimen/touch_target"
+                    android:paddingHorizontal="@dimen/space_sm"
+                    android:textColor="@color/ink"
+                    android:textColorHint="@color/muted"
+                    android:textSize="@dimen/text_md" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_watermark_group_summary" />
+            </LinearLayout>
+
             <!-- ==================== 其他 ==================== -->
 
             <TextView

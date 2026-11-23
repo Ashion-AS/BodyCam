@@ -4,6 +4,8 @@ import android.content.Context
 import android.view.KeyEvent
 import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.util.VideoCrypto
+import com.dsh.bodycam.watermark.WatermarkCorner
+import com.dsh.bodycam.watermark.WatermarkField
 
 /**
  * 设置持久化。
@@ -50,6 +52,12 @@ object SettingsStore {
     private const val KEY_VIDEO_AUDIO = "video_audio"
     private const val KEY_VIDEO_ENCRYPT = "video_encrypt"
     private const val KEY_VIDEO_ENCRYPT_PASSPHRASE = "video_encrypt_passphrase"
+    private const val KEY_WM_FIELD_TL = "wm_field_tl"
+    private const val KEY_WM_FIELD_TR = "wm_field_tr"
+    private const val KEY_WM_FIELD_BL = "wm_field_bl"
+    private const val KEY_WM_FIELD_BR = "wm_field_br"
+    private const val KEY_WM_GROUP_NAME = "wm_group_name"
+    private const val KEY_WM_USER_NAME = "wm_user_name"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
@@ -405,4 +413,69 @@ object SettingsStore {
         }
         listener?.onSettingsChanged()
     }
+
+    // ------------------------------------------------------------ 水印四角
+
+    /**
+     * 某个角显示哪类内容。
+     *
+     * 默认布局：左上经纬度、右上时间、左下 SN+录像状态、右下分组+用户名。
+     * 存的是 [WatermarkField] 的 name，读不出来的旧值回退到默认，
+     * 避免改枚举后旧版本残留值让该角直接空白。
+     */
+    fun watermarkField(context: Context, corner: WatermarkCorner): WatermarkField {
+        val key = watermarkFieldKey(corner)
+        val raw = prefs(context).getString(key, null)
+            ?: return DEFAULT_WATERMARK_FIELDS.getValue(corner)
+        return WatermarkField.entries.firstOrNull { it.name == raw }
+            ?: DEFAULT_WATERMARK_FIELDS.getValue(corner)
+    }
+
+    fun setWatermarkField(context: Context, corner: WatermarkCorner, field: WatermarkField) {
+        prefs(context).edit().putString(watermarkFieldKey(corner), field.name).apply()
+        listener?.onSettingsChanged()
+    }
+
+    private fun watermarkFieldKey(corner: WatermarkCorner): String = when (corner) {
+        WatermarkCorner.TOP_LEFT -> KEY_WM_FIELD_TL
+        WatermarkCorner.TOP_RIGHT -> KEY_WM_FIELD_TR
+        WatermarkCorner.BOTTOM_LEFT -> KEY_WM_FIELD_BL
+        WatermarkCorner.BOTTOM_RIGHT -> KEY_WM_FIELD_BR
+    }
+
+    /** 右下角第一行：平台分组名，未登录平台时是「默认组」 */
+    fun watermarkGroupName(context: Context): String =
+        prefs(context).getString(KEY_WM_GROUP_NAME, AppConfig.DEFAULT_GROUP_NAME)
+            ?.takeIf { it.isNotBlank() } ?: AppConfig.DEFAULT_GROUP_NAME
+
+    fun setWatermarkGroupName(context: Context, name: String) {
+        if (name.isBlank()) {
+            prefs(context).edit().remove(KEY_WM_GROUP_NAME).apply()
+        } else {
+            prefs(context).edit().putString(KEY_WM_GROUP_NAME, name).apply()
+        }
+        listener?.onSettingsChanged()
+    }
+
+    /** 右下角第二行：登录的用户名，未登录平台时是 user1 */
+    fun watermarkUserName(context: Context): String =
+        prefs(context).getString(KEY_WM_USER_NAME, AppConfig.DEFAULT_USER_NAME)
+            ?.takeIf { it.isNotBlank() } ?: AppConfig.DEFAULT_USER_NAME
+
+    fun setWatermarkUserName(context: Context, name: String) {
+        if (name.isBlank()) {
+            prefs(context).edit().remove(KEY_WM_USER_NAME).apply()
+        } else {
+            prefs(context).edit().putString(KEY_WM_USER_NAME, name).apply()
+        }
+        listener?.onSettingsChanged()
+    }
+
+    /** 四角的出厂默认内容 */
+    val DEFAULT_WATERMARK_FIELDS: Map<WatermarkCorner, WatermarkField> = mapOf(
+        WatermarkCorner.TOP_LEFT to WatermarkField.GPS,
+        WatermarkCorner.TOP_RIGHT to WatermarkField.TIME,
+        WatermarkCorner.BOTTOM_LEFT to WatermarkField.DEVICE_STATUS,
+        WatermarkCorner.BOTTOM_RIGHT to WatermarkField.GROUP_USER
+    )
 }

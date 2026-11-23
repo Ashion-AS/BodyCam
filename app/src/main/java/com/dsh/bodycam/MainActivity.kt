@@ -35,12 +35,14 @@ import com.dsh.bodycam.record.SegmentRecorder
 import com.dsh.bodycam.service.KeepAliveService
 import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.util.BatteryGuard
+import com.dsh.bodycam.util.DeviceSerial
 import com.dsh.bodycam.util.DiskGuard
 import com.dsh.bodycam.util.Storage
 import com.dsh.bodycam.util.StoragePermission
 import com.dsh.bodycam.util.rotationToDegrees
 import com.dsh.bodycam.watermark.PhotoWatermarker
 import com.dsh.bodycam.watermark.Telemetry
+import com.dsh.bodycam.watermark.WatermarkCorner
 import com.dsh.bodycam.watermark.WatermarkData
 import com.dsh.bodycam.watermark.WatermarkPainter
 import java.text.SimpleDateFormat
@@ -143,6 +145,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private var preRecordBuffer: PreRecordBuffer? = null
     private var painter: WatermarkPainter? = null
     private var telemetry: Telemetry? = null
+
+    /** 水印左下角第一行的设备 SN，创建时取一次（DeviceSerial 内部也缓存） */
+    private val deviceSerial: String by lazy { DeviceSerial.get(this) }
 
     // 相机流尺寸（传感器方向，一般 1920x1080 横）
     private var streamW = 1920
@@ -292,6 +297,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
                     applyPhotoSettings()
                     // 帧率会显示在顶栏读数里
                     applyOrientation()
+                    // 水印四角内容/分组名可能在设置页刚改过，立刻重画一帧
+                    updateWatermark()
                 }
             }
         }
@@ -1134,12 +1141,17 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         // 用「自动角度」而不是校准后的角度：JPEG_ORIENTATION 写的就是这个值，
         // 照片该转多少度由它决定，跟预览/录像的校准偏移无关。
         val rotation = autoRotationDeg
+        // 水印四角配置在后台线程读也没问题（SharedPreferences 是线程安全的），
+        // 但一次取好交给下面，避免每张照片重复读盘
+        val fields = WatermarkCorner.entries.associateWith {
+            SettingsStore.watermarkField(this, it)
+        }
         // 连拍时每张单独命名；毫秒时间戳保证不撞名（间隔最短 1 秒，远大于 1ms）
         val name = "IMG_${Storage.stamp()}.jpg"
         photoExecutor.execute {
             // 照片链路单独用一个 painter 实例：WatermarkPainter 内部复用 Bitmap，不是线程安全的
             val stamped = runCatching {
-                PhotoWatermarker.watermark(bytes, WatermarkPainter(), data, rotation)
+                PhotoWatermarker.watermark(bytes, WatermarkPainter(), data, fields, rotation)
             }.getOrDefault(bytes)
             val saved = runCatching { Storage.savePhoto(this, stamped, name) }.getOrNull()
             runOnUiThread {
@@ -1572,12 +1584,55 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private fun updateWatermark() {
         val p = pipeline ?: return
         val painter = painter ?: return
-        p.setWatermark(
-            painter.render(watermarkData(System.currentTimeMillis()), videoW),
-            AppConfig.WATERMARK_LEFT,
-            AppConfig.WATERMARK_BOTTOM,
-            AppConfig.WATERMARK_WIDTH
-        )
+        val data = watermarkData(System.currentTimeMillis())
+        val frameW = videoW.coerceAtLeast(1)
+        val frameH = videoH.coerceAtLeast(1)
+        // 边距按「画面宽度的百分比」定，再换算到纵向比例，这样竖屏时四边的
+        // 绝对像素间距一致（直接拿同一个比例当纵向比例会让上下边距变宽）
+        val marginX = AppConfig.WATERMARK_MARGIN
+        val marginY = frameW * AppConfig.WATERMARK_MARGIN / frameH
+
+        // 四角一起出图：共用同一字号，同一行放不下时整体等比缩小
+        val fields = WatermarkCorner.entries.associateWith {
+            SettingsStore.watermarkField(this, it)
+        }
+        val bitmaps = painter.renderAll(data, fields, frameW)
+
+        for (corner in WatermarkCorner.entries) {
+            val slot = slotOf(corner)
+            val bmp = bitmaps[corner]
+            if (bmp == null) {
+                // 该角配成「不显示」或内容还没就绪（例如 GPS 未定位），清掉旧图避免残留
+                p.clearWatermark(slot)
+                continue
+            }
+            val anchors = anchorsOf(corner)
+            p.setWatermark(
+                slot,
+                bmp,
+                marginX,
+                marginY,
+                bmp.width.toFloat() / frameW,
+                anchors.first,
+                anchors.second
+            )
+        }
+    }
+
+    /** 角 → 原生纹理槽号（cpp 里 WM_SLOTS = 4，顺序需一致） */
+    private fun slotOf(corner: WatermarkCorner): Int = when (corner) {
+        WatermarkCorner.TOP_LEFT -> 0
+        WatermarkCorner.TOP_RIGHT -> 1
+        WatermarkCorner.BOTTOM_LEFT -> 2
+        WatermarkCorner.BOTTOM_RIGHT -> 3
+    }
+
+    /** 角 → (anchorLeft, anchorBottom) */
+    private fun anchorsOf(corner: WatermarkCorner): Pair<Boolean, Boolean> = when (corner) {
+        WatermarkCorner.TOP_LEFT -> true to false
+        WatermarkCorner.TOP_RIGHT -> false to false
+        WatermarkCorner.BOTTOM_LEFT -> true to true
+        WatermarkCorner.BOTTOM_RIGHT -> false to true
     }
 
     /** 视频与照片共用同一份水印内容；照片在后台线程调用，注意不要碰 UI */
@@ -1587,8 +1642,10 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             dateText = dateFormat.format(Date(now)),
             timeText = timeFormat.format(Date(now)),
             gpsText = telemetry?.gpsText ?: "",
-            statusText = if (recording) "REC ${formatDuration(elapsed)}" else "STANDBY",
-            deviceId = AppConfig.DEVICE_ID
+            statusText = if (recording) "REC ${formatDuration(elapsed)}" else "未录像",
+            deviceId = deviceSerial,
+            groupName = SettingsStore.watermarkGroupName(this),
+            userName = SettingsStore.watermarkUserName(this)
         )
     }
 

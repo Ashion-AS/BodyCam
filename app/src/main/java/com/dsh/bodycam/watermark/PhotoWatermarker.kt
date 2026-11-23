@@ -29,10 +29,12 @@ object PhotoWatermarker {
     private const val MAX_DIMENSION = 4096
     private const val JPEG_QUALITY = 92
 
+    /** 照片在相机线程调用：水印内容由调用方准备好，这里不碰 UI 也不读设置 */
     fun watermark(
         jpeg: ByteArray,
         painter: WatermarkPainter,
         data: WatermarkData,
+        fields: Map<WatermarkCorner, WatermarkField>,
         rotationDeg: Int
     ): ByteArray {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -66,14 +68,28 @@ object PhotoWatermarker {
         }
         src.recycle()
 
-        // 水印位置/大小与视频保持同一套比例
-        val watermark = painter.render(data, outWidth)
-        val left = outWidth * AppConfig.WATERMARK_LEFT
-        val bottom = outHeight * AppConfig.WATERMARK_BOTTOM
-        val width = outWidth * AppConfig.WATERMARK_WIDTH
-        val height = width * watermark.height / watermark.width
-        val dst = RectF(left, outHeight - bottom - height, left + width, outHeight - bottom)
-        canvas.drawBitmap(watermark, null, dst, paint)
+        // 四角各贴一块，位置/字号与视频同一套比例（共用同一字号）
+        val marginX = outWidth * AppConfig.WATERMARK_MARGIN
+        // 纵向边距按像素对齐横向边距，竖拍时四边留白才一致
+        val marginY = marginX
+        val bitmaps = painter.renderAll(data, fields, outWidth)
+        for (corner in WatermarkCorner.entries) {
+            val wm = bitmaps[corner] ?: continue
+            val width = wm.width.toFloat()
+            val height = width * wm.height / wm.width
+            val left = when (corner) {
+                WatermarkCorner.TOP_LEFT, WatermarkCorner.BOTTOM_LEFT -> marginX
+                WatermarkCorner.TOP_RIGHT, WatermarkCorner.BOTTOM_RIGHT ->
+                    outWidth - marginX - width
+            }
+            val top = when (corner) {
+                WatermarkCorner.TOP_LEFT, WatermarkCorner.TOP_RIGHT -> marginY
+                WatermarkCorner.BOTTOM_LEFT, WatermarkCorner.BOTTOM_RIGHT ->
+                    outHeight - marginY - height
+            }
+            val dst = RectF(left, top, left + width, top + height)
+            canvas.drawBitmap(wm, null, dst, paint)
+        }
 
         val bos = ByteArrayOutputStream()
         output.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, bos)

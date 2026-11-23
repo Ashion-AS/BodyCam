@@ -7,6 +7,7 @@
     <string name="settings_section_record">录像设置</string>
     <string name="settings_section_photo">拍照设置</string>
     <string name="settings_section_audio">录音设置</string>
+    <string name="settings_section_watermark">水印</string>
     <string name="settings_section_other">其他</string>
     <string name="settings_pre_record_title">预录功能</string>
     <string name="settings_pre_record_summary">开始录像前持续缓存画面与声音；开启后耗电与内存占用会增加</string>
@@ -87,6 +88,24 @@
     <string name="settings_video_encrypt_key_invalid">密钥必须是 32 个字符</string>
     <string name="settings_video_encrypt_need_key">请先设置 32 位录像密钥</string>
     <string name="settings_burst_summary">间隔越短、张数越多，连拍总时长越长；连拍期间屏幕保持预览</string>
+
+    <!-- 水印 -->
+    <string name="settings_watermark_corners_title">四角内容</string>
+    <string name="settings_watermark_corners_summary">照片与录像共用同一套布局；四角各自独立设置，选「不显示」即留空</string>
+    <string name="settings_watermark_top_left">左上角</string>
+    <string name="settings_watermark_top_right">右上角</string>
+    <string name="settings_watermark_bottom_left">左下角</string>
+    <string name="settings_watermark_bottom_right">右下角</string>
+    <string name="settings_watermark_field_gps">经纬度</string>
+    <string name="settings_watermark_field_time">日期时间</string>
+    <string name="settings_watermark_field_device_status">SN + 录像状态</string>
+    <string name="settings_watermark_field_group_user">分组 + 用户</string>
+    <string name="settings_watermark_field_none">不显示</string>
+    <string name="settings_watermark_group_title">右下角分组名 / 用户名</string>
+    <string name="settings_watermark_group_hint">默认组</string>
+    <string name="settings_watermark_user_title">用户名</string>
+    <string name="settings_watermark_user_hint">user1</string>
+    <string name="settings_watermark_group_summary">留空则使用默认值「默认组」/「user1」；接入平台后由平台下发的值覆盖</string>
 
     <string name="photo_burst_done_fmt">已保存 %1$d 张</string>
     <string name="photo_burst_blocked_recording">录像中不进入连拍，请先停止录像</string>

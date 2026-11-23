@@ -161,7 +161,9 @@ void GlRenderer::threadMain() {
     }
 
     // 收尾：上下文还在，先删 GL 资源
-    if (wmTex_) glDeleteTextures(1, &wmTex_);
+    for (auto& s : wmSlots_) {
+        if (s.tex) glDeleteTextures(1, &s.tex);
+    }
     if (cameraTex_) glDeleteTextures(1, &cameraTex_);
     if (cameraProgram_) glDeleteProgram(cameraProgram_);
     if (watermarkProgram_) glDeleteProgram(watermarkProgram_);
@@ -415,16 +417,31 @@ void GlRenderer::updateCameraTexture() {
 
 // ---------------------------------------------------------------- 水印
 
-void GlRenderer::setWatermarkPixels(std::vector<uint8_t> pixels, int width, int height,
-                                    float leftFrac, float bottomFrac, float widthFrac) {
+void GlRenderer::setWatermarkPixels(int slot, std::vector<uint8_t> pixels, int width, int height,
+                                    float leftFrac, float bottomFrac, float widthFrac,
+                                    bool anchorLeft, bool anchorBottom) {
+    if (slot < 0 || slot >= WM_SLOTS) return;
     std::lock_guard<std::mutex> lk(wmMutex_);
-    wmPixels_ = std::move(pixels);
-    wmPixelW_ = width;
-    wmPixelH_ = height;
-    wmLeftFrac_ = leftFrac;
-    wmBottomFrac_ = bottomFrac;
-    wmWidthFrac_ = widthFrac;
-    wmDirty_ = true;
+    PendingWatermark& p = wmPending_[slot];
+    p.pixels = std::move(pixels);
+    p.width = width;
+    p.height = height;
+    p.leftFrac = leftFrac;
+    p.bottomFrac = bottomFrac;
+    p.widthFrac = widthFrac;
+    p.anchorLeft = anchorLeft;
+    p.anchorBottom = anchorBottom;
+    p.present = true;
+    p.dirty = true;
+}
+
+void GlRenderer::clearWatermark(int slot) {
+    if (slot < 0 || slot >= WM_SLOTS) return;
+    std::lock_guard<std::mutex> lk(wmMutex_);
+    PendingWatermark& p = wmPending_[slot];
+    p.pixels.clear();
+    p.present = false;
+    p.dirty = true;
 }
 
 void GlRenderer::setRotation(float degrees) {
@@ -432,27 +449,47 @@ void GlRenderer::setRotation(float degrees) {
 }
 
 void GlRenderer::uploadWatermarkIfNeeded() {
-    std::vector<uint8_t> data;
-    int w = 0, h = 0;
-    {
-        std::lock_guard<std::mutex> lk(wmMutex_);
-        if (!wmDirty_ || wmPixels_.empty()) return;
-        wmDirty_ = false;
-        data.swap(wmPixels_);
-        w = wmPixelW_;
-        h = wmPixelH_;
-    }
-    if (w <= 0 || h <= 0) return;
+    for (int i = 0; i < WM_SLOTS; ++i) {
+        std::vector<uint8_t> data;
+        int w = 0, h = 0;
+        bool present = false;
+        float leftFrac = 0.0f, bottomFrac = 0.0f, widthFrac = 0.4f;
+        bool anchorLeft = true, anchorBottom = true;
+        {
+            std::lock_guard<std::mutex> lk(wmMutex_);
+            PendingWatermark& p = wmPending_[i];
+            if (!p.dirty) continue;
+            p.dirty = false;
+            data.swap(p.pixels);
+            w = p.width;
+            h = p.height;
+            present = p.present;
+            leftFrac = p.leftFrac;
+            bottomFrac = p.bottomFrac;
+            widthFrac = p.widthFrac;
+            anchorLeft = p.anchorLeft;
+            anchorBottom = p.anchorBottom;
+        }
 
-    if (!wmTex_) glGenTextures(1, &wmTex_);
-    glBindTexture(GL_TEXTURE_2D, wmTex_);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
-    wmTexW_ = w;
-    wmTexH_ = h;
+        WatermarkSlot& s = wmSlots_[i];
+        s.leftFrac = leftFrac;
+        s.bottomFrac = bottomFrac;
+        s.widthFrac = widthFrac;
+        s.anchorLeft = anchorLeft;
+        s.anchorBottom = anchorBottom;
+        s.present = present && w > 0 && h > 0 && !data.empty();
+        if (!s.present) continue;
+
+        if (!s.tex) glGenTextures(1, &s.tex);
+        glBindTexture(GL_TEXTURE_2D, s.tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+        s.texW = w;
+        s.texH = h;
+    }
 }
 
 // ---------------------------------------------------------------- 绘制
@@ -575,37 +612,57 @@ void GlRenderer::drawScene(int targetWidth, int targetHeight, bool fitInside,
     // 画面已经是「正向」的（旋转已经烘进像素），水印不需要再转。
     // 预览画面不叠加水印，只有编码器/预录的输出画幅才烧进去。
     if (!withWatermark) return;
-    if (wmTex_ == 0 || wmTexW_ <= 0 || wmTexH_ <= 0) return;
 
-    const float aspect = static_cast<float>(wmTexW_) / static_cast<float>(wmTexH_);
-    const float wNdc = 2.0f * wmWidthFrac_;
-    const float hNdc = 2.0f * (wmWidthFrac_ * videoW_ / aspect) / videoH_;
-    const float cx = -1.0f + wNdc * 0.5f + wmLeftFrac_ * 2.0f;
-    const float cy = -1.0f + hNdc * 0.5f + wmBottomFrac_ * 2.0f;
-
-    const float sx = wNdc * 0.5f;
-    const float sy = hNdc * 0.5f;
-
-    const float matrix[16] = {
-            sx,  0.f, 0.f, 0.f,
-            0.f, sy,  0.f, 0.f,
-            0.f, 0.f, 1.f, 0.f,
-            cx,  cy,  0.f, 1.f,
-    };
+    // 四个角各画一块。anchor* 决定以哪条边对齐：
+    //  - 左上/左下：leftFrac 是左边界；右上/右下：leftFrac 是右边界
+    //  - 左上/右上：bottomFrac 是上边界；左下/右下：bottomFrac 是下边界
+    bool anyPresent = false;
+    for (const WatermarkSlot& s : wmSlots_) {
+        if (s.present && s.tex && s.texW > 0 && s.texH > 0) {
+            anyPresent = true;
+            break;
+        }
+    }
+    if (!anyPresent) return;
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);  // 预乘 alpha
     glUseProgram(watermarkProgram_);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, wmTex_);
     glUniform1i(wmSamplerLoc_, 0);
-    glUniformMatrix4fv(wmMatrixLoc_, 1, GL_FALSE, matrix);
-
     glEnableVertexAttribArray(wmPosLoc_);
     glVertexAttribPointer(wmPosLoc_, 2, GL_FLOAT, GL_FALSE, 0, kQuad);
     glEnableVertexAttribArray(wmTexLoc_);
     glVertexAttribPointer(wmTexLoc_, 2, GL_FLOAT, GL_FALSE, 0, kTexCoordFlipY);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    for (const WatermarkSlot& s : wmSlots_) {
+        if (!s.present || s.tex == 0 || s.texW <= 0 || s.texH <= 0) continue;
+
+        const float aspect = static_cast<float>(s.texW) / static_cast<float>(s.texH);
+        const float wNdc = 2.0f * s.widthFrac;
+        const float hNdc = 2.0f * (s.widthFrac * videoW_ / aspect) / videoH_;
+        const float cx = s.anchorLeft
+                         ? (-1.0f + wNdc * 0.5f + s.leftFrac * 2.0f)
+                         : (1.0f - wNdc * 0.5f - s.leftFrac * 2.0f);
+        const float cy = s.anchorBottom
+                         ? (-1.0f + hNdc * 0.5f + s.bottomFrac * 2.0f)
+                         : (1.0f - hNdc * 0.5f - s.bottomFrac * 2.0f);
+
+        const float sx = wNdc * 0.5f;
+        const float sy = hNdc * 0.5f;
+
+        const float matrix[16] = {
+                sx,  0.f, 0.f, 0.f,
+                0.f, sy,  0.f, 0.f,
+                0.f, 0.f, 1.f, 0.f,
+                cx,  cy,  0.f, 1.f,
+        };
+
+        glBindTexture(GL_TEXTURE_2D, s.tex);
+        glUniformMatrix4fv(wmMatrixLoc_, 1, GL_FALSE, matrix);
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+
     glDisableVertexAttribArray(wmPosLoc_);
     glDisableVertexAttribArray(wmTexLoc_);
     glDisable(GL_BLEND);

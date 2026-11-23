@@ -5,15 +5,12 @@ object AppConfig {
     const val AUDIO_BITRATE = 128_000
     const val AUDIO_SAMPLE_RATE = 48_000
 
-    /** 水印宽度占画面宽度的比例 */
-    const val WATERMARK_WIDTH = 0.60f
+    /** 水印四角的边距，占画面宽度的比例 */
+    const val WATERMARK_MARGIN = 0.020f
 
-    /** 水印左下角距离画面左边 / 下边的比例 */
-    const val WATERMARK_LEFT = 0.070f
-    const val WATERMARK_BOTTOM = 0.045f
-
-    /** 水印上的设备编号，可按需改成警号 */
-    const val DEVICE_ID = "DEV-0001"
+    /** 右下角水印：登录平台后是平台下发的分组名/用户名，未登录时用这两个默认值 */
+    const val DEFAULT_GROUP_NAME = "默认组"
+    const val DEFAULT_USER_NAME = "user1"
 
     // ------------------------------------------------------------ 录像参数档位
 

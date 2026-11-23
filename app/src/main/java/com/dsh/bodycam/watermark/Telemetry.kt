@@ -59,10 +59,9 @@ class Telemetry(private val context: Context) {
         val ns = if (location.latitude >= 0) "N" else "S"
         val ew = if (location.longitude >= 0) "E" else "W"
         gpsText = String.format(
-            Locale.US, "%s %.6f°  %s %.6f°  ±%dm",
+            Locale.US, "%s %.6f  %s %.6f",
             ns, kotlin.math.abs(location.latitude),
-            ew, kotlin.math.abs(location.longitude),
-            location.accuracy.toInt()
+            ew, kotlin.math.abs(location.longitude)
         )
     }
 

@@ -14,6 +14,8 @@ import com.dsh.bodycam.core.SettingsStore
 import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.util.StoragePermission
 import com.dsh.bodycam.util.VideoCrypto
+import com.dsh.bodycam.watermark.WatermarkCorner
+import com.dsh.bodycam.watermark.WatermarkField
 
 /**
  * 设置页：预录开关 + 预录时长（5/10/20/30s）、循环录像与空间告警阈值。
@@ -31,6 +33,12 @@ class SettingsActivity : Activity() {
     private lateinit var rgVideoQuality: RadioGroup
     private lateinit var llSegmentMinutes: LinearLayout
     private lateinit var llAudioSegmentMinutes: LinearLayout
+    private lateinit var llWmTopLeft: LinearLayout
+    private lateinit var llWmTopRight: LinearLayout
+    private lateinit var llWmBottomLeft: LinearLayout
+    private lateinit var llWmBottomRight: LinearLayout
+    private lateinit var etWmGroupName: EditText
+    private lateinit var etWmUserName: EditText
     private lateinit var swVideoAudio: Switch
     private lateinit var swVideoEncrypt: Switch
     private lateinit var etVideoEncryptKey: EditText
@@ -63,6 +71,12 @@ class SettingsActivity : Activity() {
         rgVideoQuality = findViewById(R.id.rgVideoQuality)
         llSegmentMinutes = findViewById(R.id.llSegmentMinutes)
         llAudioSegmentMinutes = findViewById(R.id.llAudioSegmentMinutes)
+        llWmTopLeft = findViewById(R.id.llWmTopLeft)
+        llWmTopRight = findViewById(R.id.llWmTopRight)
+        llWmBottomLeft = findViewById(R.id.llWmBottomLeft)
+        llWmBottomRight = findViewById(R.id.llWmBottomRight)
+        etWmGroupName = findViewById(R.id.etWmGroupName)
+        etWmUserName = findViewById(R.id.etWmUserName)
         swVideoAudio = findViewById(R.id.swVideoAudio)
         swVideoEncrypt = findViewById(R.id.swVideoEncrypt)
         etVideoEncryptKey = findViewById(R.id.etVideoEncryptKey)
@@ -113,6 +127,7 @@ class SettingsActivity : Activity() {
         buildBatteryWarnOptions()
         buildVideoOptions()
         buildAudioOptions()
+        buildWatermarkOptions()
         updateSections()
     }
 
@@ -214,6 +229,17 @@ class SettingsActivity : Activity() {
     /** 全局提示条，位置与互斥由 [ToastBar] 统一管理 */
     private fun toast(message: String) {
         ToastBar.show(this, message)
+    }
+
+    /** 失焦保存之外再兜一次：用户直接在输入框里按返回键时不会触发失焦 */
+    override fun onPause() {
+        super.onPause()
+        if (::etWmGroupName.isInitialized) {
+            SettingsStore.setWatermarkGroupName(this, etWmGroupName.text.toString().trim())
+        }
+        if (::etWmUserName.isInitialized) {
+            SettingsStore.setWatermarkUserName(this, etWmUserName.text.toString().trim())
+        }
     }
 
     override fun onDestroy() {
@@ -497,6 +523,48 @@ class SettingsActivity : Activity() {
     }
 
     /**
+     * 水印四角配置 + 右下角的分组名/用户名。
+     *
+     * 四角可选内容一样（[WatermarkField] 全列表 + 「不显示」），用 2 列网格：
+     * 5 个选项排 3 行（3+2），与设置页其他多选项区的观感一致。
+     * 不限制四角选同一类内容——重复显示是合法用法（例如四个角都想放时间）。
+     */
+    private fun buildWatermarkOptions() {
+        val labels = WATERMARK_FIELD_IDS.map { getString(it.second) }
+
+        val corners = listOf(
+            WatermarkCorner.TOP_LEFT to llWmTopLeft,
+            WatermarkCorner.TOP_RIGHT to llWmTopRight,
+            WatermarkCorner.BOTTOM_LEFT to llWmBottomLeft,
+            WatermarkCorner.BOTTOM_RIGHT to llWmBottomRight
+        )
+        for ((corner, container) in corners) {
+            val current = SettingsStore.watermarkField(this, corner)
+            buildOptionGrid(
+                container, labels,
+                WATERMARK_FIELD_IDS.indexOfFirst { it.first == current },
+                columns = 2
+            ) { index ->
+                SettingsStore.setWatermarkField(this, corner, WATERMARK_FIELD_IDS[index].first)
+            }
+        }
+
+        etWmGroupName.setText(SettingsStore.watermarkGroupName(this))
+        etWmUserName.setText(SettingsStore.watermarkUserName(this))
+        // 焦点变化时才落盘：逐字保存会在输入过程中反复触发录制侧的重绘与重载
+        etWmGroupName.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                SettingsStore.setWatermarkGroupName(this, etWmGroupName.text.toString().trim())
+            }
+        }
+        etWmUserName.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                SettingsStore.setWatermarkUserName(this, etWmUserName.text.toString().trim())
+            }
+        }
+    }
+
+    /**
      * 关闭预录时，时长区降到 40% 不透明度并整体不可点；
      * 单拍模式下，连拍区同理置灰（选项值保留，切回连拍即恢复）。
      */
@@ -516,5 +584,16 @@ class SettingsActivity : Activity() {
         )
         // 连拍区在单拍模式下整个隐藏：它没有可调的语义，留在页面上只会误导
         burstSection.visibility = if (burst) View.VISIBLE else View.GONE
+    }
+
+    private companion object {
+        /** 四角可选的内容，顺序即网格顺序 */
+        val WATERMARK_FIELD_IDS: List<Pair<WatermarkField, Int>> = listOf(
+            WatermarkField.GPS to R.string.settings_watermark_field_gps,
+            WatermarkField.TIME to R.string.settings_watermark_field_time,
+            WatermarkField.DEVICE_STATUS to R.string.settings_watermark_field_device_status,
+            WatermarkField.GROUP_USER to R.string.settings_watermark_field_group_user,
+            WatermarkField.NONE to R.string.settings_watermark_field_none
+        )
     }
 }
