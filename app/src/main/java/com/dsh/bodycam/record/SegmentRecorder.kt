@@ -379,18 +379,27 @@ class SegmentRecorder(private val context: Context) {
             if (segment.writeSample(segment.videoTrack, f.data, ptsUs, f.flags)) n++
         }
         Log.i(TAG, "wrote $n handover video frames")
-        // 紧接着写入 muxer 就绪前缓存下来的实时帧，保证同一轨 PTS 连续
-        if (pendingRealtimeVideo.isNotEmpty()) {
-            var m = 0
-            for (f in pendingRealtimeVideo) {
-                val ptsUs = f.ptsUs - basePtsUs
-                if (ptsUs < 0) continue
-                if (!segment.acceptVideoSample(f.flags)) continue
-                if (segment.writeSample(segment.videoTrack, f.data, ptsUs, f.flags)) m++
-            }
-            Log.i(TAG, "wrote $m buffered realtime video frames")
-            pendingRealtimeVideo.clear()
+    }
+
+    /**
+     * 补写 muxer 就绪前缓存的实时视频帧（调用方持锁）。
+     *
+     * 必须紧跟在交接帧之后、任何后续实时帧之前写：这些帧的 PTS 与后继帧连续，
+     * 晚写或漏写都会在成片开头留下空洞（播放器在那里花屏/冻结）。
+     * 普通录像没有交接帧，同样要刷——否则开头 0.25~1 秒永远缺失。
+     */
+    private fun flushPendingRealtimeLocked() {
+        if (pendingRealtimeVideo.isEmpty()) return
+        val segment = muxer ?: return
+        var n = 0
+        for (f in pendingRealtimeVideo) {
+            val ptsUs = f.ptsUs - basePtsUs
+            if (ptsUs < 0) continue
+            if (!segment.acceptVideoSample(f.flags)) continue
+            if (segment.writeSample(segment.videoTrack, f.data, ptsUs, f.flags)) n++
         }
+        Log.i(TAG, "wrote $n buffered realtime video frames")
+        pendingRealtimeVideo.clear()
     }
 
     /** 预录交接的音频帧（在音频线程里、建轨后写入） */
@@ -642,6 +651,9 @@ class SegmentRecorder(private val context: Context) {
             if (audioEnabledThisRun) writeHandoverAudioLocked(frames)
             pendingAudioHandover = null
         }
+        // 交接帧之后立刻补就绪前缓存的实时帧。普通录像没有交接帧，
+        // 走预录关闭分支也必须刷，否则成片开头会缺 0.25~1 秒画面。
+        flushPendingRealtimeLocked()
     }
 
     private fun switchSegmentLocked(nextPtsUs: Long) {

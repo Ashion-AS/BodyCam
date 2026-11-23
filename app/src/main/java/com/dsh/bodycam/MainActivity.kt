@@ -1359,7 +1359,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         pipeline?.setRecording(false)
         pipeline?.clearEncoderWindow()
 
-        stopService(Intent(this, KeepAliveService::class.java))
+        // 前台服务不能在这里就停：停录收尾（排空编码器 + 写尾帧 + 修补文件）
+        // 是异步的，服务一旦先停，用户此时划掉 App 会让最后一段停在半截。
+        // 统一放收尾结束之后（onSegmentSaved / wait 分支）再停。
         // 不停 ticker：空闲时水印上的时间也要继续走
         updateUi()
         updateTimer()
@@ -1371,6 +1373,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             runCatching { rec.stop() }
             if (!preEnabled) preRecordBuffer?.release()
             runOnUiThread { applyPreRecordSetting() }
+            stopRecordingService()
             return
         }
 
@@ -1379,8 +1382,17 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             val files = runCatching { rec.stop() }.getOrDefault(emptyList())
             val micPeak = rec.lastMicPeak
             savingSegment = false
+            // 直接在收尾完成后从工作线程停服务，不走 uiHandler：
+            // 用户在收尾途中划掉 App 时 onDestroy 会清空 uiHandler，
+            // post 的收尾不执行，服务就再也没人停了。
+            stopRecordingService()
             uiHandler.post { onSegmentSaved(files, micPeak) }
         }
+    }
+
+    /** 停录收尾（编码器排空 + 文件落盘）完成后才允许停前台服务 */
+    private fun stopRecordingService() {
+        runCatching { stopService(Intent(this, KeepAliveService::class.java)) }
     }
 
     /** 录制文件已收尾：提示结果并重新拉起预录缓存（在 UI 线程） */

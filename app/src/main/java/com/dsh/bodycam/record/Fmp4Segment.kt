@@ -14,6 +14,7 @@ import androidx.media3.muxer.SeekableMuxerOutput
 import com.dsh.bodycam.util.Storage
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
+import java.util.concurrent.Executors
 
 /**
  * 一个 fMP4 分段：文件条目 + muxer + 输出流，负责建流、建轨、写样本与收尾。
@@ -119,10 +120,12 @@ internal class Fmp4Segment private constructor(
             entry.abort()
             false
         } else {
-            // muxer 写 moov 时还不知道总时长，duration 全是 0；不补的话
-            // ExoPlayer 会认为流时长 0，READY 后立刻 ENDED（单轨音频必现）
-            entry.patchDurations()
-            entry.commit()
+            // 修补会重扫全文件（大分段上百 MB），绝不能在录制线程/持锁路径上同步做：
+            // 那样每次切段都会卡住编码线程，丢帧甚至 ANR。
+            // 丢到单线程队列里串行补，顺序与切段顺序一致，不会并发改同一个文件；
+            // 即使进程这时被杀，文件也已经是可播放的 fMP4，只是缺 duration/mfra
+            // （下次播放前 ViewerActivity 还会再补一遍）。
+            finishAsync(entry)
             true
         }
     }
@@ -130,6 +133,26 @@ internal class Fmp4Segment private constructor(
     companion object {
         /** 分片时长：强杀时最多丢这么久的数据 */
         const val FRAGMENT_DURATION_MS = 2_000L
+
+        /**
+         * 收尾修补串行队列：一次只改一个文件，避免并发重写抢 I/O。
+         * 进程级 daemon 线程，随进程退出，不需要显式关闭。
+         */
+        private val patchExecutor = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "bodycam-muxer-fix").apply { isDaemon = true }
+        }
+
+        /**
+         * 先补 duration/mfra、再让 MediaScanner 索引：顺序不能反，
+         * 否则媒体库会把 duration=0 的版本缓存下来。
+         */
+        private fun finishAsync(entry: Storage.Entry) {
+            patchExecutor.execute {
+                runCatching { entry.patchDurations() }
+                    .onFailure { Log.w("Fmp4Segment", "patch ${entry.displayName}", it) }
+                entry.commit()
+            }
+        }
 
         /**
          * 建一个分段，任何一步失败都清理干净并返回 null。

@@ -10,7 +10,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 （缓存 5 / 10 / 20 / 30 秒可调）。
 
 另外提供**独立录音页**：只采声音、不开相机，上半部是实时波形，下半部是一个
-「开始 / 停止」二合一按钮；录音同样按 30 分钟自动分段，编码器不停、只换封装文件。
+「开始 / 停止」二合一按钮；录音同样自动分段（5~30 分钟可调），编码器不停、只换封装文件。
 
 <p align="center">
   <img src="docs/preview.png" width="300" alt="预览界面">
@@ -45,7 +45,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 数字变焦 | 预览右侧竖向缩放条，拖动即改 `SCALER_CROP_REGION`；录像中也能调，拍照沿用同一视野（见「六点七」） |
 | 拍照设置 | 单拍 / 连拍、JPEG 质量高·中·低、输出尺寸四档；连拍可设间隔与张数，全部持久化（见「六点八」） |
 | 独立录音（波形 + 二合一按钮） | `AudioRecordActivity` + `AudioRecorder`，底部操作坞「录音」按钮进入（见「八点六」） |
-| 录音 30 分钟自动分段 | `AudioRecorder`：编码器不停，只在分段点换新的 fMP4 封装器 |
+| 录音分段可配 | 录音设置分区可选 5 / 10 / 15 / 20 / 30 分钟，独立于录像分段时长 |
 | 文件管理（图片 / 视频 / 音频） | `FilesActivity`：三个 tab 分别列出 `BodyCam/{Image,Video,Audio}` 下的文件，最新在最上；点击进入 `ViewerActivity` 看图 / 播视频 / 播音频 |
 | 强杀/掉电后文件仍可播放 | 录像与录音都写 **fMP4**（media3 `FragmentedMp4Muxer`），最多丢最后一个分片（2 秒） |
 | 录音/视频在 App 内可正常播放 | `util/MuxerFix` 收尾时回填 moov 的 duration、修正音频同步样本位、注入 tfdt、追写 mfra 索引（见「八点八」「八点九」「八点九之二」「八点九之三」） |
@@ -635,7 +635,8 @@ btnIr.setOnClickListener {
 Activity 切回主线程绘制）。
 
 **分段**：与 `SegmentRecorder` 同一思路——编码器自始至终**只启动一次**、持续输出，
-到 `AUDIO_SEGMENT_SECONDS`（默认 30 分钟）时只关闭旧分段、开一个新分段接着写。
+到「录音分段时长」设定的秒数（设置页可选 5~30 分钟，默认 30 分钟）时只关闭旧分段、
+开一个新分段接着写。
 所以分段不打断录音，只在文件边界丢掉不足一帧的尾部（AAC 一帧约 23ms）。
 PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一段都能独立播放**。
 文件命名 `AUD_yyyyMMdd_HHmmss_partNN.m4a`，落在 `BodyCam/Audio/yyyyMMdd`。
@@ -704,8 +705,9 @@ media3 的 `FragmentedMp4Extractor` 读 moov 时按 `mehd` → 各轨 `tkhd` 的
 `ENDED`，一个样本都不送进解码器。**单轨文件必然踩到**（本工程的录音就是单轨）；
 视频因为有第二条轨兜底才没暴露。PC 端播放器会自己扫分片累计时长，所以能放。
 
-**修复**：`util/MuxerFix.kt`。关文件前（`Fmp4Segment.close()` 里、`commit()` 之前）
-扫一遍所有 `moof/traf/trun`，按 track 累计样本 duration，再写回上述三处：
+**修复**：`util/MuxerFix.kt`。关文件后（`Fmp4Segment.close()` 里、`MediaScanner` 索引之前，
+放在单线程后台队列串行执行）扫一遍所有 `moof/traf/trun`，按 track 累计样本
+duration，再写回上述三处：
 
 ```
 mvhd.duration = max(各轨 durUs) * mvhd.timescale / 1e6
@@ -1100,8 +1102,8 @@ fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
 
 | 参数 | 说明 |
 | --- | --- |
-| `SEGMENT_MINUTE_OPTIONS` | 录像分段时长档位（5 / 10 / 15 / 20 / 30 分钟），存的是分钟数 |
-| `AUDIO_SEGMENT_SECONDS` | 录音分段长度，默认 `30 * 60`；调成 8 秒即可快速验证切片 |
+| `SEGMENT_MINUTE_OPTIONS` | 录像与录音分段时长共用档位（5 / 10 / 15 / 20 / 30 分钟），存的是分钟数 |
+| `DEFAULT_AUDIO_SEGMENT_SECONDS` | 录音分段长度的默认值 `30 * 60`；实际值以设置页为准，调成 8 秒便于验证切片 |
 | `DEFAULT_VIDEO_FPS` / `DEFAULT_SEGMENT_MINUTES` | 录像帧率与分段时长的默认值；实际值以设置页为准 |
 | `videoSizeOptions()` / `VIDEO_SIZE_LABELS` | 录像分辨率四档（4K / 1080P / 720P / D1），存的是档位下标 |
 | `VIDEO_QUALITY_HIGH/MEDIUM/LOW` | 画质档对应的每像素每帧比特数（0.10 / 0.06 / 0.035） |
@@ -1175,7 +1177,8 @@ fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
   ```
 - 验证分段：设置页把「分段时长」选成 5 分钟（或临时把 `DEFAULT_SEGMENT_MINUTES` 改成 1），
   录够时间后 `adb pull` 应得到多个 `partNN.mp4`，每个都能单独播放。
-- 验证录音分段：把 `AppConfig.AUDIO_SEGMENT_SECONDS` 临时改成 8，在录音页录 20 秒，
+- 验证录音分段：设置页把「录音设置 → 分段时长」选成 5 分钟（或临时把
+  `AppConfig.DEFAULT_AUDIO_SEGMENT_SECONDS` 改成 8），在录音页录 20 秒，
   `adb pull` 后应得到 2~3 个 `AUD_...partNN.m4a`，每个都能单独播放；录音页波形应随
   说话明显起伏、静音时回落到基线。
 - 验证预录：开启预录（10 秒），在预览界面停留 15 秒以上再按音量- 开始录像，录 5 秒后
