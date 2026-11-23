@@ -83,6 +83,14 @@ class SegmentRecorder(private val context: Context) {
      */
     private var audioEnabledThisRun = true
 
+    /**
+     * 本次录制的加密口令（null = 不加密）。
+     *
+     * 在 [start] 时一次性定下，之后每个分段都用它加密：中途改设置只影响
+     * 下一次录制，避免同一段录制的多个 part 用不同口令（回放时要逐个试）。
+     */
+    private var encryptPassphraseThisRun: String? = null
+
     private var sessionStartUs = 0L
     private var basePtsUs = -1L
 
@@ -144,7 +152,8 @@ class SegmentRecorder(private val context: Context) {
         orientation: Int,
         segmentSeconds: Int,
         preHandover: PreRecordBuffer.Handover? = null,
-        audioEnabled: Boolean = true
+        audioEnabled: Boolean = true,
+        encryptPassphrase: String? = null
     ): Surface? {
         synchronized(lock) {
             if (started) return null
@@ -157,6 +166,7 @@ class SegmentRecorder(private val context: Context) {
             videoFormat = null
             audioFormat = null
             audioEnabledThisRun = audioEnabled
+            encryptPassphraseThisRun = encryptPassphrase
             segmentDurationUs = segmentSeconds.coerceAtLeast(1) * US_PER_SECOND
             orientationHint = orientation
             // 必须用 CLOCK_BOOTTIME：相机帧时间戳（SENSOR_TIMESTAMP）就是这个时基。
@@ -607,7 +617,9 @@ class SegmentRecorder(private val context: Context) {
      */
     private fun createMuxerLocked() {
         val name = "VID_${nameBase}_part${String.format(Locale.US, "%02d", segmentIndex)}.mp4"
-        val segment = Fmp4Segment.open(TAG, name) { Storage.createVideo(context, it) }
+        val segment = Fmp4Segment.open(TAG, name, encryptPassphraseThisRun) {
+            Storage.createVideo(context, it)
+        }
         if (segment == null) {
             currentSegmentName = ""
             return

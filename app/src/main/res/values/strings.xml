@@ -10,6 +10,7 @@
     <string name="readout_fmt">%1$d×%2$d %3$dfps</string>
     <string name="glyph_back">←</string>
     <string name="action_back">返回</string>
+    <string name="action_save">保存</string>
 
     <string name="need_permission">需要相机与录音权限才能工作</string>
     <string name="need_storage_access">需要「所有文件访问」权限才能保存文件，请在系统设置中开启</string>
@@ -87,5 +88,13 @@
     <string name="viewer_image_failed">图片打不开</string>
     <string name="viewer_play_failed">文件打不开</string>
     <string name="viewer_loading">正在加载…</string>
+    <string name="viewer_passphrase_title">该录像已加密</string>
+    <string name="viewer_passphrase_hint">请输入录制时设置的 32 位录像密钥</string>
+    <string name="viewer_passphrase_placeholder">32 位录像密钥</string>
+    <string name="viewer_passphrase_confirm">解密并播放</string>
+    <string name="viewer_passphrase_empty">请先输入密钥</string>
+    <string name="viewer_passphrase_wrong_len">密钥长度不正确：当前 %1$d 位，应为 32 位</string>
+    <string name="viewer_passphrase_wrong">解密失败：密钥不正确，或文件已被篡改</string>
+    <string name="viewer_decrypting">正在解密…</string>
     <string name="file_meta_fmt">%1$s · %2$s</string>
 </resources>

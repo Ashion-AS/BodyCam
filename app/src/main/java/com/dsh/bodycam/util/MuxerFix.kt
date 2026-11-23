@@ -38,12 +38,12 @@ internal object MuxerFix {
     private const val TAG = "MuxerFix"
 
     /**
-     * 进程级串行锁。录制收尾的后台修补与播放前的修补可能同时针对同一个文件
-     * （刚停录就去播放），而 [patchTfdt] 用固定的 `<name>.tfdt` 临时文件 + rename，
-     * 并发跑会互相覆盖临时文件、甚至让 rename 落成半截内容。修补本身很快，
-     * 串行不损性能。
+     * 进程级串行锁。录制收尾的后台修补、加密与播放前的修补可能同时针对同一个
+     * 文件（刚停录就去播放），而 [patchTfdt] 用固定的 `<name>.tfdt` 临时文件 +
+     * rename，[VideoCrypto.encryptInPlace] 也会整体替换文件；并发跑会互相覆盖，
+     * 甚至让 rename 落成半截内容。修补本身很快，串行不损性能。
      */
-    private val patchLock = Any()
+    internal val patchLock = Any()
 
     /** sample_flags 里的 `sample_is_non_sync_sample` 位（bit16） */
     private const val NON_SYNC_FLAG = 0x10000L

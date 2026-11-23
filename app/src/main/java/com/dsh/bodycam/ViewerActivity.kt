@@ -20,6 +20,7 @@ import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.ui.ZoomableImageView
 import com.dsh.bodycam.util.MuxerFix
 import com.dsh.bodycam.util.Storage
+import com.dsh.bodycam.util.VideoCrypto
 import java.io.File
 
 /**
@@ -53,8 +54,14 @@ class ViewerActivity : Activity() {
     private lateinit var playerView: PlayerView
     private lateinit var audioIcon: ImageView
     private lateinit var loadingOverlay: android.view.View
+    private lateinit var passphraseOverlay: android.view.View
+    private lateinit var passphraseInput: android.widget.EditText
+    private lateinit var passphraseError: TextView
 
     private var player: ExoPlayer? = null
+
+    /** 解密出的临时明文文件，退出播放页时删掉 */
+    private var decryptedTemp: File? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,6 +72,9 @@ class ViewerActivity : Activity() {
         playerView = findViewById(R.id.playerView)
         audioIcon = findViewById(R.id.audioIcon)
         loadingOverlay = findViewById(R.id.loadingOverlay)
+        passphraseOverlay = findViewById(R.id.passphraseOverlay)
+        passphraseInput = findViewById(R.id.passphraseInput)
+        passphraseError = findViewById(R.id.passphraseError)
 
         findViewById<TextView>(R.id.btnBack).setOnClickListener { finish() }
         padControlRows()
@@ -84,9 +94,73 @@ class ViewerActivity : Activity() {
         titleView.text = file.name
         when (kind) {
             Storage.Kind.IMAGE -> showImage(file)
-            Storage.Kind.VIDEO -> showMedia(file, audio = false)
+            // 视频可能是加密的，音频不会（录音不加密）
+            Storage.Kind.VIDEO -> {
+                if (VideoCrypto.isEncrypted(file)) askPassphrase(file, audio = false)
+                else showMedia(file, audio = false)
+            }
             Storage.Kind.AUDIO -> showMedia(file, audio = true)
         }
+    }
+
+    // ------------------------------------------------------------ 解密
+
+    /**
+     * 加密录像：先让用户输口令，再解密成临时明文文件交给播放链路。
+     *
+     * 为什么落临时文件而不是自定义 DataSource 边读边解：本工程的加密是整文件
+     * 分块（不是帧级），`ExoPlayer` 的 extractor 需要随机访问容器结构，边读边解
+     * 得自己实现 `DataSource` 并重做 seek 语义，改动大且容易在拖动进度条时出错。
+     * 落地明文再标准播放最稳；临时文件在退出播放页时立即删除。
+     */
+    private fun askPassphrase(file: File, audio: Boolean) {
+        passphraseOverlay.visibility = View.VISIBLE
+        passphraseError.visibility = View.GONE
+        passphraseInput.setText("")
+        passphraseInput.requestFocus()
+
+        findViewById<View>(R.id.btnPassphraseConfirm).setOnClickListener {
+            val input = passphraseInput.text.toString()
+            val err = when {
+                input.isEmpty() -> getString(R.string.viewer_passphrase_empty)
+                !VideoCrypto.isValidPassphrase(input) ->
+                    getString(R.string.viewer_passphrase_wrong_len, input.length)
+                else -> null
+            }
+            if (err != null) {
+                passphraseError.text = err
+                passphraseError.visibility = View.VISIBLE
+                return@setOnClickListener
+            }
+            decryptThenPlay(file, input, audio)
+        }
+    }
+
+    /** 后台解密 → 成功后走正常播放；失败提示口令错或文件被篡改 */
+    private fun decryptThenPlay(file: File, passphrase: String, audio: Boolean) {
+        passphraseError.visibility = View.GONE
+        loadingOverlay.visibility = View.VISIBLE
+        val temp = File(cacheDir, "dec_${System.currentTimeMillis()}.mp4")
+
+        Thread {
+            val ok = runCatching {
+                VideoCrypto.decryptTo(file, passphrase, temp)
+            }.getOrDefault(false)
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                if (!ok) {
+                    loadingOverlay.visibility = View.GONE
+                    passphraseError.text = getString(R.string.viewer_passphrase_wrong)
+                    passphraseError.visibility = View.VISIBLE
+                    return@runOnUiThread
+                }
+                // 解密成功：上一份临时明文（若有）立刻删，避免反复解密堆积
+                decryptedTemp?.delete()
+                decryptedTemp = temp
+                passphraseOverlay.visibility = View.GONE
+                showMedia(temp, audio)
+            }
+        }.start()
     }
 
     override fun onPause() {
@@ -99,6 +173,9 @@ class ViewerActivity : Activity() {
         playerView.player = null
         player?.release()
         player = null
+        // 明文临时文件必须删干净：留在缓存目录里等于加密白做了
+        decryptedTemp?.delete()
+        decryptedTemp = null
         super.onDestroy()
     }
 

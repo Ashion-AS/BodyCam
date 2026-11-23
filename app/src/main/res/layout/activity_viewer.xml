@@ -125,6 +125,84 @@
                 android:text="@string/viewer_loading"
                 android:textSize="@dimen/text_md" />
         </LinearLayout>
+
+        <!--
+          加密录像的密钥输入层：盖住整个内容区，播放器此时还没有 mediaItem。
+          自带一点纸面质感（bg_panel + 边距），输入框、确认按钮都在这一块里，
+          不弹系统对话框——现场戴手套操作，系统弹窗的按钮太小。
+        -->
+        <LinearLayout
+            android:id="@+id/passphraseOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/paper_3"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="@dimen/space_lg"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_panel"
+                android:orientation="vertical"
+                android:padding="@dimen/space_lg">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/viewer_passphrase_title" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/viewer_passphrase_hint" />
+
+                <EditText
+                    android:id="@+id/passphraseInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_md"
+                    android:background="@drawable/bg_pre_record_option"
+                    android:hint="@string/viewer_passphrase_placeholder"
+                    android:importantForAutofill="no"
+                    android:inputType="textVisiblePassword"
+                    android:maxLength="32"
+                    android:minHeight="@dimen/touch_target"
+                    android:paddingHorizontal="@dimen/space_md"
+                    android:singleLine="true"
+                    android:textColor="@color/ink"
+                    android:textColorHint="@color/muted"
+                    android:textSize="@dimen/text_md" />
+
+                <TextView
+                    android:id="@+id/passphraseError"
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:textColor="@color/rec_signal"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/btnPassphraseConfirm"
+                    style="@style/BodyCamLabel"
+                    android:layout_width="match_parent"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginTop="@dimen/space_md"
+                    android:background="@drawable/bg_pre_record_option"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center"
+                    android:text="@string/viewer_passphrase_confirm"
+                    android:textColor="@color/accent" />
+            </LinearLayout>
+        </LinearLayout>
     </FrameLayout>
 
 </LinearLayout>

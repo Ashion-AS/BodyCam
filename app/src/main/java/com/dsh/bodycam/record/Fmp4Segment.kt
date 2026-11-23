@@ -12,6 +12,7 @@ import androidx.media3.muxer.FragmentedMp4Muxer
 import androidx.media3.muxer.Muxer
 import androidx.media3.muxer.SeekableMuxerOutput
 import com.dsh.bodycam.util.Storage
+import com.dsh.bodycam.util.VideoCrypto
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
@@ -32,7 +33,9 @@ internal class Fmp4Segment private constructor(
     val entry: Storage.Entry,
     private val fd: ParcelFileDescriptor,
     private val out: FileOutputStream,
-    private val muxer: Muxer
+    private val muxer: Muxer,
+    /** 非空 = 收尾后按此口令加密文件内容（仅录像用；录音传 null） */
+    private val encryptPassphrase: String? = null
 ) {
     /** 轨 id；-1 = 该轨尚未建立 */
     var videoTrack = -1
@@ -125,7 +128,9 @@ internal class Fmp4Segment private constructor(
             // 丢到单线程队列里串行补，顺序与切段顺序一致，不会并发改同一个文件；
             // 即使进程这时被杀，文件也已经是可播放的 fMP4，只是缺 duration/mfra
             // （下次播放前 ViewerActivity 还会再补一遍）。
-            finishAsync(entry)
+            // 加密同样在这个队列里做，且必须排在修补之后：加密后文件不再是
+            // 可解析的 fMP4，MuxerFix 就没法再改它了。
+            finishAsync(entry, encryptPassphrase)
             true
         }
     }
@@ -135,7 +140,7 @@ internal class Fmp4Segment private constructor(
         const val FRAGMENT_DURATION_MS = 2_000L
 
         /**
-         * 收尾修补串行队列：一次只改一个文件，避免并发重写抢 I/O。
+         * 收尾串行队列：修补、加密、扫描入库都在这里排，一次只动一个文件。
          * 进程级 daemon 线程，随进程退出，不需要显式关闭。
          */
         private val patchExecutor = Executors.newSingleThreadExecutor { r ->
@@ -143,24 +148,47 @@ internal class Fmp4Segment private constructor(
         }
 
         /**
-         * 先补 duration/mfra、再让 MediaScanner 索引：顺序不能反，
-         * 否则媒体库会把 duration=0 的版本缓存下来。
+         * 顺序不能乱：
+         * 1. 补 duration/mfra —— 加密后文件不再是可解析的 fMP4，改不了了；
+         * 2. 加密（仅录像且开关生效时）；
+         * 3. MediaScanner 索引 —— 放在最后，媒体库拿到的就是最终产物。
+         *
+         * 加密后跳过扫描：媒体扫描器会拿文件头去解 mp4，解不开就记一条失败，
+         * 相册里还可能留一个坏缩略图。文件仍在原目录，本 App 的列表页按目录
+         * 枚举文件，不依赖媒体库。
          */
-        private fun finishAsync(entry: Storage.Entry) {
+        private fun finishAsync(entry: Storage.Entry, encryptPassphrase: String?) {
             patchExecutor.execute {
                 runCatching { entry.patchDurations() }
                     .onFailure { Log.w("Fmp4Segment", "patch ${entry.displayName}", it) }
-                entry.commit()
+                var encrypted = false
+                if (encryptPassphrase != null) {
+                    val file = entry.fileOrNull()
+                    if (file != null) {
+                        encrypted = runCatching {
+                            VideoCrypto.encryptInPlace(file, encryptPassphrase)
+                        }.onFailure {
+                            Log.w("Fmp4Segment", "encrypt ${entry.displayName}", it)
+                        }.getOrDefault(false)
+                    }
+                }
+                if (encrypted) {
+                    Log.i("Fmp4Segment", "${entry.displayName} encrypted, skip media scan")
+                } else {
+                    entry.commit()
+                }
             }
         }
 
         /**
          * 建一个分段，任何一步失败都清理干净并返回 null。
          * @param createEntry 决定落盘目录：[Storage.createVideo] 或 [Storage.createAudio]
+         * @param encryptPassphrase 非空 = 收尾后加密文件内容（仅录像传值）
          */
         fun open(
             tag: String,
             name: String,
+            encryptPassphrase: String? = null,
             createEntry: (String) -> Storage.Entry?
         ): Fmp4Segment? {
             val entry = createEntry(name)
@@ -186,7 +214,7 @@ internal class Fmp4Segment private constructor(
                 entry.abort()
                 return null
             }
-            return Fmp4Segment(tag, entry, fd, out, muxer)
+            return Fmp4Segment(tag, entry, fd, out, muxer, encryptPassphrase)
         }
     }
 }

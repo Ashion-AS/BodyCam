@@ -54,6 +54,9 @@ object Storage {
         private val context: Context,
         private val file: File
     ) {
+        /** 落盘文件句柄；收尾加密要用它，所以不暴露可写流，只给 File */
+        fun fileOrNull(): File? = if (file.exists()) file else null
+
         /** 给 muxer 用的读写 FD；拿不到返回 null */
         fun openReadWrite(): ParcelFileDescriptor? = try {
             ParcelFileDescriptor.open(

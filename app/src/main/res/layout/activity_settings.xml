@@ -223,7 +223,108 @@
                     android:minHeight="@dimen/touch_target" />
             </LinearLayout>
 
-            <!-- 行 5：生效时机提示 -->
+            <!-- 行 5：录像加密开关 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_video_encrypt_title" />
+
+                    <TextView
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_2xs"
+                        android:text="@string/settings_video_encrypt_summary" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swVideoEncrypt"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:minWidth="@dimen/touch_target"
+                    android:minHeight="@dimen/touch_target" />
+            </LinearLayout>
+
+            <!-- 行 6：录像密钥（32 个字符） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_video_encrypt_key_title" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_video_encrypt_key_summary" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <EditText
+                        android:id="@+id/etVideoEncryptKey"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_pre_record_option"
+                        android:hint="@string/settings_video_encrypt_key_placeholder"
+                        android:importantForAutofill="no"
+                        android:inputType="textVisiblePassword"
+                        android:maxLength="32"
+                        android:minHeight="@dimen/touch_target"
+                        android:paddingHorizontal="@dimen/space_md"
+                        android:singleLine="true"
+                        android:textColor="@color/ink"
+                        android:textColorHint="@color/muted"
+                        android:textSize="@dimen/text_md" />
+
+                    <TextView
+                        android:id="@+id/btnVideoEncryptKeySave"
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="@dimen/touch_target"
+                        android:layout_marginStart="@dimen/space_sm"
+                        android:background="@drawable/bg_pre_record_option"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:gravity="center"
+                        android:paddingHorizontal="@dimen/space_md"
+                        android:text="@string/action_save"
+                        android:textColor="@color/accent" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 行 7：生效时机提示 -->
             <TextView
                 style="@style/BodyCamHint"
                 android:layout_width="match_parent"

@@ -3,6 +3,7 @@ package com.dsh.bodycam.core
 import android.content.Context
 import android.view.KeyEvent
 import com.dsh.bodycam.core.AppConfig
+import com.dsh.bodycam.util.VideoCrypto
 
 /**
  * 设置持久化。
@@ -47,6 +48,8 @@ object SettingsStore {
     private const val KEY_SEGMENT_MINUTES = "segment_minutes"
     private const val KEY_AUDIO_SEGMENT_MINUTES = "audio_segment_minutes"
     private const val KEY_VIDEO_AUDIO = "video_audio"
+    private const val KEY_VIDEO_ENCRYPT = "video_encrypt"
+    private const val KEY_VIDEO_ENCRYPT_PASSPHRASE = "video_encrypt_passphrase"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
@@ -294,6 +297,31 @@ object SettingsStore {
         prefs(context).edit().putBoolean(KEY_VIDEO_AUDIO, enabled).apply()
         listener?.onSettingsChanged()
     }
+
+    /**
+     * 录像是否加密。开启且已设置合法口令时，录像收尾后把文件内容加密。
+     * 关闭不影响已加密的历史文件——它们仍需口令才能播放。
+     */
+    fun isVideoEncryptEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_VIDEO_ENCRYPT, false)
+
+    fun setVideoEncryptEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_VIDEO_ENCRYPT, enabled).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 录像加密口令（32 个字符）；未设置返回空串 */
+    fun videoEncryptPassphrase(context: Context): String =
+        prefs(context).getString(KEY_VIDEO_ENCRYPT_PASSPHRASE, "").orEmpty()
+
+    fun setVideoEncryptPassphrase(context: Context, passphrase: String) {
+        prefs(context).edit().putString(KEY_VIDEO_ENCRYPT_PASSPHRASE, passphrase).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 加密开关是否真正生效：开关打开且口令合法 */
+    fun isVideoEncryptActive(context: Context): Boolean =
+        isVideoEncryptEnabled(context) && VideoCrypto.isValidPassphrase(videoEncryptPassphrase(context))
 
     // ------------------------------------------------------------ 外接触发
 

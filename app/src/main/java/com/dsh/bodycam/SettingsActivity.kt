@@ -3,6 +3,7 @@ package com.dsh.bodycam
 import android.app.Activity
 import android.os.Bundle
 import android.view.View
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -12,6 +13,7 @@ import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.core.SettingsStore
 import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.util.StoragePermission
+import com.dsh.bodycam.util.VideoCrypto
 
 /**
  * 设置页：预录开关 + 预录时长（5/10/20/30s）、循环录像与空间告警阈值。
@@ -30,6 +32,8 @@ class SettingsActivity : Activity() {
     private lateinit var llSegmentMinutes: LinearLayout
     private lateinit var llAudioSegmentMinutes: LinearLayout
     private lateinit var swVideoAudio: Switch
+    private lateinit var swVideoEncrypt: Switch
+    private lateinit var etVideoEncryptKey: EditText
     private lateinit var rgPhotoFlash: RadioGroup
     private lateinit var rgPhotoMode: RadioGroup
     private lateinit var rgPhotoQuality: RadioGroup
@@ -60,6 +64,8 @@ class SettingsActivity : Activity() {
         llSegmentMinutes = findViewById(R.id.llSegmentMinutes)
         llAudioSegmentMinutes = findViewById(R.id.llAudioSegmentMinutes)
         swVideoAudio = findViewById(R.id.swVideoAudio)
+        swVideoEncrypt = findViewById(R.id.swVideoEncrypt)
+        etVideoEncryptKey = findViewById(R.id.etVideoEncryptKey)
         rgPhotoFlash = findViewById(R.id.rgPhotoFlash)
         rgPhotoMode = findViewById(R.id.rgPhotoMode)
         rgPhotoQuality = findViewById(R.id.rgPhotoQuality)
@@ -436,6 +442,40 @@ class SettingsActivity : Activity() {
         swVideoAudio.isChecked = SettingsStore.isVideoAudioEnabled(this)
         swVideoAudio.setOnCheckedChangeListener { _, checked ->
             SettingsStore.setVideoAudioEnabled(this, checked)
+        }
+
+        buildVideoEncryptOptions()
+    }
+
+    /**
+     * 录像加密：开关 + 32 位密钥。
+     *
+     * 开关不能单独生效——没有合法密钥时不加密，否则录出来的文件谁也打不开。
+     * 所以打开开关时先校验密钥，缺失就提示并回弹，逼用户先把密钥填好。
+     */
+    private fun buildVideoEncryptOptions() {
+        etVideoEncryptKey.setText(SettingsStore.videoEncryptPassphrase(this))
+        swVideoEncrypt.isChecked = SettingsStore.isVideoEncryptEnabled(this)
+
+        swVideoEncrypt.setOnCheckedChangeListener { _, checked ->
+            if (checked && !VideoCrypto.isValidPassphrase(etVideoEncryptKey.text.toString())) {
+                swVideoEncrypt.isChecked = false
+                toast(getString(R.string.settings_video_encrypt_need_key))
+                return@setOnCheckedChangeListener
+            }
+            SettingsStore.setVideoEncryptEnabled(this, checked)
+        }
+
+        findViewById<View>(R.id.btnVideoEncryptKeySave).setOnClickListener {
+            val key = etVideoEncryptKey.text.toString()
+            if (!VideoCrypto.isValidPassphrase(key)) {
+                toast(getString(R.string.settings_video_encrypt_key_invalid))
+                return@setOnClickListener
+            }
+            SettingsStore.setVideoEncryptPassphrase(this, key)
+            // 输入框收起键盘，顺便给出「已保存」的确认
+            etVideoEncryptKey.clearFocus()
+            toast(getString(R.string.settings_video_encrypt_key_saved))
         }
     }
 

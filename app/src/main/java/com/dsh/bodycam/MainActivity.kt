@@ -1230,7 +1230,11 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             0,  // 画面已经烘成正向，不需要再写 rotation 元数据
             params.segmentSeconds,
             handover,
-            params.audio
+            params.audio,
+            // 开录时定下加密口令，整段录制的所有分段共用同一个
+            if (SettingsStore.isVideoEncryptActive(this)) {
+                SettingsStore.videoEncryptPassphrase(this)
+            } else null
         )
         if (surface == null) {
             // 交接出去的编码器归录制器管，失败时得由录制器释放；这里只需提示

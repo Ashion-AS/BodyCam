@@ -46,6 +46,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 拍照设置 | 单拍 / 连拍、JPEG 质量高·中·低、输出尺寸四档；连拍可设间隔与张数，全部持久化（见「六点八」） |
 | 独立录音（波形 + 二合一按钮） | `AudioRecordActivity` + `AudioRecorder`，底部操作坞「录音」按钮进入（见「八点六」） |
 | 录音分段可配 | 录音设置分区可选 5 / 10 / 15 / 20 / 30 分钟，独立于录像分段时长 |
+| 录像加密 | 设置页开关 + 32 位密钥；收尾后整文件 AES-256-GCM 分块加密，回放时输入密钥解密（见「八点十三」） |
 | 文件管理（图片 / 视频 / 音频） | `FilesActivity`：三个 tab 分别列出 `BodyCam/{Image,Video,Audio}` 下的文件，最新在最上；点击进入 `ViewerActivity` 看图 / 播视频 / 播音频 |
 | 强杀/掉电后文件仍可播放 | 录像与录音都写 **fMP4**（media3 `FragmentedMp4Muxer`），最多丢最后一个分片（2 秒） |
 | 录音/视频在 App 内可正常播放 | `util/MuxerFix` 收尾时回填 moov 的 duration、修正音频同步样本位、注入 tfdt、追写 mfra 索引（见「八点八」「八点九」「八点九之二」「八点九之三」） |
@@ -123,6 +124,7 @@ app/src/main/
 │   ├── util/MuxerFix.kt             # 回填 fMP4 的 duration、修正音频同步样本位、注入 tfdt、追写 mfra 索引（media3 muxer 的四个补丁）
 │   ├── util/DiskGuard.kt            # 剩余空间检查 + 循环录像清理（只删 BodyCam/Video 下的 VID_ 分段）
 │   ├── util/BatteryGuard.kt         # 电量两级阈值检查（告警 / 安全停录），充电中一律视为正常
+│   ├── util/VideoCrypto.kt          # 录像文件 AES-256-GCM 分块加解密（见「八点十之二点七」）
 │   └── util/Storage.kt              # 文件落盘 + 文件页的目录枚举（list）
 └── res/                             # 布局（主界面/设置页/文件页/查看页）、主题、图标、无障碍配置
 ```
@@ -1064,6 +1066,67 @@ fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
 
 ---
 
+## 八点十之二点七、录像加密（`util/VideoCrypto`）
+
+设置页「录像设置」分区里的**录像加密**开关 + **录像密钥**（32 个字符）。
+只加密录像文件内容，录音与照片保持明文；文件名、目录、大小仍是可见的。
+
+### 为什么是整文件分块，不是帧级加密
+
+GA/T 947 / GB 35114 一类方案通常做**帧级加密**（编码器每出一帧就加密一帧）。
+本工程做不到：`media3` 的 `FragmentedMp4Muxer` 内部直接写磁盘，没有插入加密钩子的位置；
+要做帧级就得改 muxer、接管 sample 写入、自建分片索引，等于重写半个封装层。
+
+这里改成**收尾时整文件分块加密**：录制热路径零改动、零性能损失，
+而且块与块独立（各有 IV），天然支持按块随机访问——回放拖动进度条不受影响。
+
+### 文件格式
+
+```
+magic  "BCENC1"   6B    识别「本 App 加密过的录像」
+salt   16B              随机盐，参与密钥派生
+chunk* N 个块           每块 = IV(12B) || 密文(≤64KB) || Tag(16B)
+```
+
+- 算法 **AES-256-GCM**，每块独立随机 IV，Tag 128 bit；
+- 密钥 = `SHA-256(salt || 32 字口令)`：同一口令在不同文件派生出不同密钥，
+  避免跨文件复用同一密钥；
+- 最后一块可以短于 64KB，其余块定长。
+
+### 加密时机
+
+在 `Fmp4Segment.finishAsync()` 的收尾串行队列里，顺序固定：
+
+1. `MuxerFix.patchDurations()` —— 补 duration/mfra（加密后就改不动了）；
+2. `VideoCrypto.encryptInPlace()` —— 写 `<name>.enc` 临时文件再换名，
+   失败时原文件不动；
+3. **跳过 `MediaScanner`** —— 媒体扫描器拿文件头去解 mp4，解不开会记失败、
+   还可能在相册留坏缩略图。文件仍在原目录，App 列表页按目录枚举，不依赖媒体库。
+
+口令在 `SegmentRecorder.start()` 时一次性定下，整段录制的所有分段共用同一个，
+避免同一段录像的多个 part 用不同口令。
+
+### 回放
+
+`ViewerActivity` 打开录像时先查魔数（`VideoCrypto.isEncrypted`）：
+
+- 明文 → 走原来的播放链路；
+- 加密 → 盖一层密钥输入层（不弹系统对话框，现场戴手套按钮太小），
+  校验长度后后台 `decryptTo()` 解到 `cacheDir` 的临时明文文件，
+  再交给标准播放链路；退出页面立即删掉临时文件。
+
+口令错误或文件被改动时 GCM Tag 校验失败，提示「密钥不正确，或文件已被篡改」。
+
+### 保护边界（重要）
+
+- **能防**：文件被拷走后，没有口令打不开；任何字节被改动都无法播放（GCM Tag）。
+- **不能防**：拿到 root 的人（口令在 SharedPreferences 里，与文件同机）；
+  也无法隐藏「这里有录像」——文件名与目录是明文。
+  方案文档里的「密钥存 Keystore/TEE」是更高一档的做法，本需求按可用性取舍。
+- 关掉开关不影响已加密的历史文件，它们仍然需要口令才能播放。
+
+---
+
 ## 八点十一、提示条（`ui/ToastBar`）
 
 全应用的文字提示统一走 `ui/ToastBar`，不再用系统 `Toast`。
@@ -1164,7 +1227,10 @@ fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
 10. **循环录像只清理视频分段**：`DiskGuard` 删的是 `BodyCam/Video` 下的 `VID_*.mp4`，
     照片、录音以及目录里其它来源的文件都不动。所以照片/录音堆积同样会占满磁盘，
     那部分需要手动清理。
-11. **未做**：断点续录、加密存储、Wi-Fi 回传、GNSS 北斗原始数据。
+11. **录像加密的边界**：口令存在 SharedPreferences，与录像文件同机，能拿到 root
+    的人可同时取得两者；文件名、目录、大小仍是明文，只加密文件内容。这是
+    「防拷走后随意播放」级别的防护，不是「防本机取证」。详见「八点十之二点七」。
+12. **未做**：断点续录、Wi-Fi 回传、GNSS 北斗原始数据。
 
 ---
 
@@ -1189,6 +1255,12 @@ fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
 - 验证强杀可播：开始录像（或录音）后执行
   `adb shell am force-stop com.dsh.bodycam`，`adb pull` 出当前 `partNN` 文件，
   应能直接播放且内容完整到最后一次分片（最多缺 2 秒）。
+- 验证录像加密：设置页填 32 位密钥并打开「录像加密」，录 10 秒后 `adb pull`
+  出 `partNN.mp4`，用 `xxd -l 6` 看开头应是 `BCENC1`（而不是 `ftyp`）——明内容
+  已加密、VLC 等播放器打不开；再回到 App 内从文件页打开该录像，输入同一密钥应能
+  正常播放并拖动进度条，输错密钥应提示「密钥不正确，或文件已被篡改」。
+- 日志 tag `VideoCrypto` 可看加解密过程：`encrypted xxx.mp4 (plain N bytes)` /
+  `decrypted xxx.mp4 -> dec_xxx.mp4`。
 - 想确认水印确实烧进视频：录 10 秒后 `adb pull` 到电脑，用播放器打开暂停看左下角；
   或用 `ffprobe` 核对分辨率、码率、每段的 `rotation`。
 - 改 JNI 方法签名时，`WatermarkEngine.kt` 与 `jni_bridge.cpp` 必须同步改，

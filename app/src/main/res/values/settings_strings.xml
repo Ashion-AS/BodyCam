@@ -78,6 +78,14 @@
     <string name="settings_video_audio_title">视频声音</string>
     <string name="settings_video_audio_summary">关闭后录像不带声音，文件里只有视频轨；录音功能不受影响</string>
     <string name="settings_video_next_run_hint">分辨率、帧率与画质在下次开始录像时生效</string>
+    <string name="settings_video_encrypt_title">录像加密</string>
+    <string name="settings_video_encrypt_summary">开启后录像文件内容用 AES-256 加密，回放时需输入密钥；录音与照片不受影响</string>
+    <string name="settings_video_encrypt_key_title">录像密钥</string>
+    <string name="settings_video_encrypt_key_summary">32 个字符，字母数字符号均可；遗失后已加密的录像将无法播放</string>
+    <string name="settings_video_encrypt_key_placeholder">请输入 32 位录像密钥</string>
+    <string name="settings_video_encrypt_key_saved">密钥已保存</string>
+    <string name="settings_video_encrypt_key_invalid">密钥必须是 32 个字符</string>
+    <string name="settings_video_encrypt_need_key">请先设置 32 位录像密钥</string>
     <string name="settings_burst_summary">间隔越短、张数越多，连拍总时长越长；连拍期间屏幕保持预览</string>
 
     <string name="photo_burst_done_fmt">已保存 %1$d 张</string>
