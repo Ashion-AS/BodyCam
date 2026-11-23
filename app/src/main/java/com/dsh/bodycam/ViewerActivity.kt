@@ -147,7 +147,12 @@ class ViewerActivity : Activity() {
     /**
      * 视频与音频共用同一个播放链路，唯一差别是音频没有画面：
      * PlayerView 照常存在（控制条要它承载），只是背后垫一个大话筒图标。
+     *
+     * `DefaultExtractorsFactory` 与 `setFragmentedMp4ExtractorFlags` 都是 media3 的
+     * `@UnstableApi`：官方只对打了这个标记的接口保留「不保证跨版本二进制兼容」。
+     * 本工程锁定 media3 1.11.1，升级版本时回归一次播放/拖动即可，故直接 opt-in。
      */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun showMedia(file: File, audio: Boolean) {
         playerView.visibility = View.VISIBLE
         if (audio) {
