@@ -556,7 +556,12 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         cameraSurface = surface
 
         painter = WatermarkPainter()
-        recorder = SegmentRecorder(this)
+        recorder = SegmentRecorder(this).also { rec ->
+            // 存储写不进去时录制器会放弃写盘，但它自己不知道该怎么收尾。
+            // 必须转成一次真正的停录：复位 UI、停前台服务、提示用户，
+            // 否则就是「跑了一分钟、界面还在录、最后 0 个文件」的假录。
+            rec.onFatalError = { reason -> onRecordingFatalError(reason) }
+        }
         preRecordBuffer = PreRecordBuffer(this)
 
         val controller = buildCameraController(spec, surface)
@@ -1153,20 +1158,36 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             val stamped = runCatching {
                 PhotoWatermarker.watermark(bytes, WatermarkPainter(), data, fields, rotation)
             }.getOrDefault(bytes)
-            val saved = runCatching { Storage.savePhoto(this, stamped, name) }.getOrNull()
+            val saved = runCatching { Storage.savePhoto(this, stamped, name) }
+                .getOrDefault(Storage.PhotoResult.fail(Storage.FailReason.IO_ERROR))
             runOnUiThread {
-                if (saved != null) burstSaved++
+                if (saved.name != null) burstSaved++
                 // 连拍（含收尾等待期）不逐张弹提示，否则每秒一条把画面盖住；
                 // 汇总由 settleBurst 在全部落盘后统一弹一次
                 if (!burstActive) {
                     toast(
-                        if (saved != null) getString(R.string.photo_saved, saved)
-                        else getString(R.string.photo_failed)
+                        if (saved.name != null) getString(R.string.photo_saved, saved.name)
+                        else getString(storageFailText(saved.failReason, R.string.photo_failed))
                     )
                 }
             }
         }
     }
+
+    /**
+     * 存储类失败的统一文案选择：有具体原因就用具体原因，否则用 [fallback]。
+     *
+     * 文案差异只在「录像已停止」这句上，拍照/启动失败时那句话不准确，
+     * 所以拍照路径单独传 [R.string.photo_failed] 的变体。
+     */
+    private fun storageFailText(reason: Storage.FailReason?, fallback: Int): Int =
+        when (reason) {
+            Storage.FailReason.NO_PERMISSION -> R.string.record_failed_no_permission_short
+            Storage.FailReason.NOT_WRITABLE -> R.string.record_failed_not_writable_short
+            Storage.FailReason.NO_SPACE -> R.string.record_failed_no_space_short
+            Storage.FailReason.IO_ERROR -> R.string.record_failed_io_short
+            null -> fallback
+        }
 
     private fun flashScreen() {
         flashView.alpha = 0.6f
@@ -1249,8 +1270,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             } else null
         )
         if (surface == null) {
-            // 交接出去的编码器归录制器管，失败时得由录制器释放；这里只需提示
-            toast(getString(R.string.record_init_failed))
+            // 交接出去的编码器归录制器管，失败时得由录制器释放；这里只需提示。
+            // 存储不可写导致的启动失败会留 lastCreateFailReason，用它给出准确原因。
+            toast(getString(storageFailText(rec.lastCreateFailReason, R.string.record_init_failed)))
             return
         }
 
@@ -1353,6 +1375,29 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             intent.putExtra(KeepAliveService.EXTRA_POST_RECORD_CLEAR, true)
         }
         notifyRecordingService(intent)
+    }
+
+    /**
+     * 录制器报告存储不可写：这是不可恢复的失败，必须当作一次真正的停录。
+     *
+     * 之所以不把「重试」放在这里：MTK 等 ROM 上这类失败是权限模型决定的，
+     * 稳定复现且 App 侧无法绕过（见 Storage.FailReason 注释）。继续留着
+     * 界面显示「录制中」只会让用户以为录到了东西。
+     *
+     * 回调来自编码线程，这里只做线程切换，收尾全部交给 stopRecording。
+     */
+    private fun onRecordingFatalError(reason: Storage.FailReason) {
+        uiHandler.post {
+            if (!recording) return@post
+            val msg = when (reason) {
+                Storage.FailReason.NO_PERMISSION -> R.string.record_failed_no_permission
+                Storage.FailReason.NOT_WRITABLE -> R.string.record_failed_not_writable
+                Storage.FailReason.NO_SPACE -> R.string.record_failed_no_space
+                Storage.FailReason.IO_ERROR -> R.string.record_failed_io
+            }
+            toast(getString(msg))
+            stopRecording()
+        }
     }
 
     /**

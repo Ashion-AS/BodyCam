@@ -33,6 +33,15 @@ import kotlin.math.sqrt
  */
 class AudioRecorder(private val context: Context) {
 
+    /**
+     * 最近一次分段创建失败的原因；[start] 失败后由调用方读取以给出准确提示。
+     *
+     * 放实例字段而不是 Storage 的全局状态：全局会被其他并发写入覆盖。
+     */
+    @Volatile
+    var lastCreateFailReason: Storage.FailReason? = null
+        private set
+
     companion object {
         private const val TAG = "AudioRecorder"
         private const val STOP_TIMEOUT_MS = 4_000L
@@ -102,6 +111,7 @@ class AudioRecorder(private val context: Context) {
             segmentIndex = 0
             ptsBaseUs = 0L
             audioFormat = null
+            lastCreateFailReason = null
             segmentDurationUs = segmentSeconds.coerceAtLeast(1) * US_PER_SECOND
             nameBase = Storage.stamp()
         }
@@ -296,8 +306,11 @@ class AudioRecorder(private val context: Context) {
     /** 建一个新分段的 muxer 与相册条目（调用方持锁） */
     private fun createMuxerLocked(): Boolean {
         val name = "AUD_${nameBase}_part${String.format(Locale.US, "%02d", segmentIndex)}.m4a"
-        val segment = Fmp4Segment.open(TAG, name) { Storage.createAudio(context, it) }
-            ?: return false
+        val result = Fmp4Segment.open(TAG, name) { Storage.createAudio(context, it) }
+        val segment = result.segment ?: run {
+            lastCreateFailReason = result.failReason ?: Storage.FailReason.IO_ERROR
+            return false
+        }
         muxer = segment
         // 首个分段要等编码器吐格式才能建轨；后续分段格式已知，直接建轨追上写入
         if (audioFormat != null) startMuxerLocked()

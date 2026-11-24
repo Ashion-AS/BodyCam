@@ -48,6 +48,39 @@ object Storage {
     /** 与 DCIM 同级的应用根目录 */
     private const val ROOT = "BodyCam"
 
+    /**
+     * 建条目的失败原因。
+     *
+     * 必须区分「致命」与「可重试」：前者在部分 ROM 上会稳定复现且无法自愈
+     * （例如 MTK 的 FUSE 不给 app 写 `/storage/emulated/0` 的权限，即使
+     * MANAGE_EXTERNAL_STORAGE 显示已授予），录制器必须立刻中止而不是
+     * 空转几十秒后交出一个 0 字节的结果。
+     */
+    enum class FailReason {
+        /** 没拿到存储权限（用户没开「所有文件访问」，或运行时权限被拒） */
+        NO_PERMISSION,
+
+        /** 目录建不出来，或文件打不开。权限被 ROM 拒绝、只读挂载都归这里 */
+        NOT_WRITABLE,
+
+        /** 磁盘已满（ENOSPC），腾出空间后可以重试 */
+        NO_SPACE,
+
+        /** 其它 IO 问题，通常可重试 */
+        IO_ERROR
+    }
+
+    /** 建条目的结果：成功带 [Entry]，失败带 [FailReason] */
+    class CreateResult(val entry: Entry?, val failReason: FailReason?) {
+        /** 失败原因；成功时为 null */
+        val error: FailReason? get() = failReason
+
+        companion object {
+            fun ok(entry: Entry) = CreateResult(entry, null)
+            fun fail(reason: FailReason) = CreateResult(null, reason)
+        }
+    }
+
     /** 一个正在写或已写完的输出条目 */
     class Entry(
         val displayName: String,
@@ -57,17 +90,29 @@ object Storage {
         /** 落盘文件句柄；收尾加密要用它，所以不暴露可写流，只给 File */
         fun fileOrNull(): File? = if (file.exists()) file else null
 
-        /** 给 muxer 用的读写 FD；拿不到返回 null */
-        fun openReadWrite(): ParcelFileDescriptor? = try {
-            ParcelFileDescriptor.open(
-                file,
-                ParcelFileDescriptor.MODE_CREATE or
-                    ParcelFileDescriptor.MODE_READ_WRITE or
-                    ParcelFileDescriptor.MODE_TRUNCATE
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "openReadWrite $displayName", e)
-            null
+        /** 本条目打开失败的原因；仅 [openReadWrite] / [openWrite] 失败后有意义 */
+        var openFailReason: FailReason? = null
+            private set
+
+        /** 给 muxer 用的读写 FD；拿不到返回 null，原因见 [openFailReason] */
+        fun openReadWrite(): ParcelFileDescriptor? {
+            return try {
+                ParcelFileDescriptor.open(
+                    file,
+                    ParcelFileDescriptor.MODE_CREATE or
+                        ParcelFileDescriptor.MODE_READ_WRITE or
+                        ParcelFileDescriptor.MODE_TRUNCATE
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "openReadWrite $displayName", e)
+                openFailReason = when {
+                    runCatching { file.parentFile?.usableSpace }.getOrNull() == 0L ->
+                        FailReason.NO_SPACE
+                    e is java.io.FileNotFoundException -> FailReason.NOT_WRITABLE
+                    else -> FailReason.IO_ERROR
+                }
+                null
+            }
         }
 
         fun openWrite(): OutputStream? = try {
@@ -121,16 +166,22 @@ object Storage {
     }
 
     /** 建一个待写视频条目，落在 BodyCam/Video/yyyyMMdd */
-    fun createVideo(context: Context, displayName: String): Entry? =
+    fun createVideo(context: Context, displayName: String): CreateResult =
         create(context, displayName, "Video")
 
     /** 建一个待写音频条目，落在 BodyCam/Audio/yyyyMMdd */
-    fun createAudio(context: Context, displayName: String): Entry? =
+    fun createAudio(context: Context, displayName: String): CreateResult =
         create(context, displayName, "Audio")
 
-    /** 直接存一张照片，落在 BodyCam/Image/yyyyMMdd；成功返回显示名 */
-    fun savePhoto(context: Context, bytes: ByteArray, displayName: String): String? {
-        val entry = create(context, displayName, "Image") ?: return null
+    /**
+     * 直接存一张照片，落在 BodyCam/Image/yyyyMMdd。
+     *
+     * 失败原因随结果一起返回，不用全局变量：拍照是并发执行的（连拍每张一个
+     * 任务跑在 photoExecutor 上），全局变量会被后一张覆盖，弹出来的提示就串了。
+     */
+    fun savePhoto(context: Context, bytes: ByteArray, displayName: String): PhotoResult {
+        val result = create(context, displayName, "Image")
+        val entry = result.entry ?: return PhotoResult.fail(result.failReason)
         val ok = try {
             entry.openWrite()?.use { it.write(bytes) } != null
         } catch (e: Exception) {
@@ -139,10 +190,18 @@ object Storage {
         }
         if (!ok) {
             entry.abort()
-            return null
+            return PhotoResult.fail(FailReason.IO_ERROR)
         }
         entry.commit()
-        return displayName
+        return PhotoResult.ok(displayName)
+    }
+
+    /** 拍照落盘的结果：成功带显示名，失败带原因 */
+    class PhotoResult(val name: String?, val failReason: FailReason?) {
+        companion object {
+            fun ok(name: String) = PhotoResult(name, null)
+            fun fail(reason: FailReason?) = PhotoResult(null, reason)
+        }
     }
 
     fun stamp(): String =
@@ -226,17 +285,40 @@ object Storage {
      * @param typeDir 类型子目录名：`Video` / `Image` / `Audio`；会在其后拼上 `/yyyyMMdd`。
      */
     @SuppressLint("MissingPermission") // 权限由调用方通过 StoragePermission 保证
-    private fun create(context: Context, displayName: String, typeDir: String): Entry? {
+    private fun create(context: Context, displayName: String, typeDir: String): CreateResult {
         if (!StoragePermission.isGranted(context)) {
             Log.e(TAG, "no storage access, skip $displayName")
-            return null
+            return CreateResult.fail(FailReason.NO_PERMISSION)
         }
         @Suppress("DEPRECATION")
         val dir = File(Environment.getExternalStorageDirectory(), "$ROOT/$typeDir/${today()}")
         if (!dir.exists() && !dir.mkdirs()) {
-            Log.e(TAG, "mkdirs failed: $dir")
-            return null
+            // mkdirs 失败有两种：目录其实已存在（并发/已建好），或真的建不出来。
+            // 前者不是错误，继续往下；后者按失败上报。
+            if (!dir.exists()) {
+                return CreateResult.fail(classifyCreateFailure(dir, "mkdirs failed: $dir"))
+            }
+            if (!dir.canWrite()) {
+                val reason = classifyCreateFailure(dir, "dir not writable: $dir")
+                return CreateResult.fail(reason)
+            }
         }
-        return Entry(displayName, context.applicationContext, File(dir, displayName))
+        return CreateResult.ok(Entry(displayName, context.applicationContext, File(dir, displayName)))
+    }
+
+    /**
+     * 目录建不出来时判定原因。
+     *
+     * 关键坑：[dir] 在这个时刻**不存在**，而 `File.usableSpace` 对不存在的路径
+     * 会做 statvfs 失败并返回 0——直接拿它判断会把「权限被拒」误报成「磁盘已满」。
+     * 所以必须往上找到第一个存在的祖先目录，那里的剩余空间才是真的。
+     */
+    private fun classifyCreateFailure(dir: File, message: String): FailReason {
+        val anchor = generateSequence(dir) { it.parentFile }.firstOrNull { it.exists() }
+        val free = anchor?.usableSpace ?: -1L
+        // 空间充足却建不出目录 = 权限/只读挂载（MTK 的 FUSE 拒绝就落这里）
+        val reason = if (free == 0L) FailReason.NO_SPACE else FailReason.NOT_WRITABLE
+        Log.e(TAG, "$message (reason=$reason free=$free)")
+        return reason
     }
 }

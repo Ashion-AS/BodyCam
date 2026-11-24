@@ -181,7 +181,7 @@ internal class Fmp4Segment private constructor(
         }
 
         /**
-         * 建一个分段，任何一步失败都清理干净并返回 null。
+         * 建一个分段，任何一步失败都清理干净并返回失败原因。
          * @param createEntry 决定落盘目录：[Storage.createVideo] 或 [Storage.createAudio]
          * @param encryptPassphrase 非空 = 收尾后加密文件内容（仅录像传值）
          */
@@ -189,18 +189,21 @@ internal class Fmp4Segment private constructor(
             tag: String,
             name: String,
             encryptPassphrase: String? = null,
-            createEntry: (String) -> Storage.Entry?
-        ): Fmp4Segment? {
-            val entry = createEntry(name)
+            createEntry: (String) -> Storage.CreateResult
+        ): OpenResult {
+            val created = createEntry(name)
+            val entry = created.entry
             if (entry == null) {
-                Log.e(tag, "create entry failed: $name")
-                return null
+                val reason = created.failReason ?: Storage.FailReason.IO_ERROR
+                Log.e(tag, "create entry failed: $name ($reason)")
+                return OpenResult.fail(reason)
             }
             val fd = entry.openReadWrite()
             if (fd == null) {
-                Log.e(tag, "open fd failed: $name")
+                val reason = entry.openFailReason ?: Storage.FailReason.IO_ERROR
+                Log.e(tag, "open fd failed: $name ($reason)")
                 entry.abort()
-                return null
+                return OpenResult.fail(reason)
             }
             val out = FileOutputStream(fd.fileDescriptor)
             val muxer = try {
@@ -212,9 +215,17 @@ internal class Fmp4Segment private constructor(
                 runCatching { out.close() }
                 runCatching { fd.close() }
                 entry.abort()
-                return null
+                return OpenResult.fail(Storage.FailReason.IO_ERROR)
             }
-            return Fmp4Segment(tag, entry, fd, out, muxer, encryptPassphrase)
+            return OpenResult.ok(Fmp4Segment(tag, entry, fd, out, muxer, encryptPassphrase))
+        }
+    }
+
+    /** [open] 的结果：成功带实例，失败带原因（失败原因要一路传到录制器） */
+    class OpenResult(val segment: Fmp4Segment?, val failReason: Storage.FailReason?) {
+        companion object {
+            fun ok(segment: Fmp4Segment) = OpenResult(segment, null)
+            fun fail(reason: Storage.FailReason) = OpenResult(null, reason)
         }
     }
 }

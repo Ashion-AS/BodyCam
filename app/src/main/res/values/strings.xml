@@ -24,6 +24,15 @@
     <string name="video_saved_with_pre">（含预录 %1$d 秒：%2$s）</string>
     <string name="video_failed">视频保存失败（可能没有录到帧）</string>
     <string name="record_init_failed">录像初始化失败</string>
+    <string name="record_failed_not_writable">存储不可写，录像已停止（该机型可能限制了应用直接写公共目录）</string>
+    <string name="record_failed_no_space">存储空间已满，录像已停止</string>
+    <string name="record_failed_no_permission">没有存储权限，录像已停止</string>
+    <string name="record_failed_io">写入失败，录像已停止</string>
+    <!-- 非录像路径（拍照/启动）用短版本：后面不该出现「录像已停止」 -->
+    <string name="record_failed_not_writable_short">存储不可写（该机型可能限制了应用写公共目录）</string>
+    <string name="record_failed_no_space_short">存储空间已满</string>
+    <string name="record_failed_io_short">写入失败</string>
+    <string name="record_failed_no_permission_short">没有存储权限</string>
     <string name="record_saving">正在保存上一段，请稍候</string>
     <string name="audio_silent">注意：本次录像几乎没有声音（麦克风峰值 %1$d）</string>
     <string name="rotation_offset">校准 +%1$d°  R=%2$d  输出 %3$d×%4$d</string>

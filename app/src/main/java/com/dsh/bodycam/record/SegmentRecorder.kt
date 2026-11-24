@@ -56,6 +56,19 @@ class SegmentRecorder(private val context: Context) {
 
         /** muxer 就绪前最多缓存多少实时视频帧（约 2 秒 @30fps） */
         private const val MAX_PENDING_REALTIME_FRAMES = 60
+
+        /**
+         * muxer 迟迟建不起来就判定为致命失败（毫秒）。
+         *
+         * 正常情况下一两百毫秒就绪（等音频编码器吐格式）；超过这个时限还建不起来，
+         * 只可能是存储写不进去（权限被 ROM 拒、只读挂载、磁盘满）。
+         * 不设这个判据的话，视频帧会被无限缓存-丢弃，用户录满一整段却拿到
+         * 0 个文件（见 MTK 机型的 mkdirs 失败案例）。
+         */
+        private const val MUXER_READY_TIMEOUT_MS = 3_000L
+
+        /** [pendingSinceMs] 的空值哨兵 */
+        private const val NO_PENDING = -1L
     }
 
     private val lock = Object()
@@ -65,6 +78,34 @@ class SegmentRecorder(private val context: Context) {
 
     @Volatile
     private var stopping = false
+
+    /**
+     * 录制因存储不可写而彻底失败时的回调（在工作线程触发）。
+     *
+     * 一旦触发，本次录制已经没有意义：编码器还在跑，但一个字节都落不了盘。
+     * 调用方必须按「停录」处理（收尾、复位 UI、提示用户），否则就是假录。
+     */
+    @Volatile
+    var onFatalError: ((Storage.FailReason) -> Unit)? = null
+
+    /** 已经上报过致命错误，避免每帧重复触发 */
+    @Volatile
+    private var fatalReported = false
+
+    /**
+     * 开始等待 muxer 就绪的时刻（elapsedRealtime 毫秒）；[NO_PENDING] = 当前没有在等。
+     *
+     * 用墙钟而不是帧 PTS：预录交接会把 basePtsUs 归零、切段也会重置时间基准，
+     * 而这里要判断的是「连续多久有帧却一帧都写不进去」，跟视频时间轴无关。
+     */
+    private var pendingSinceMs = NO_PENDING
+
+    /**
+     * 最近一次分段创建失败的原因；[start] 失败后由调用方读取以给出准确提示。
+     */
+    @Volatile
+    var lastCreateFailReason: Storage.FailReason? = null
+        private set
 
     private var videoCodec: MediaCodec? = null
     private var audioCodec: MediaCodec? = null
@@ -163,6 +204,9 @@ class SegmentRecorder(private val context: Context) {
             segmentStartPtsUs = 0L
             pendingSwitch = false
             pendingRealtimeVideo.clear()
+            pendingSinceMs = NO_PENDING
+            fatalReported = false
+            lastCreateFailReason = null
             videoFormat = null
             audioFormat = null
             audioEnabledThisRun = audioEnabled
@@ -206,7 +250,20 @@ class SegmentRecorder(private val context: Context) {
             }
             // 交接块之后的实时帧来自同一编码器，与交接块尾部在编码流上连续，
             // 不需要等 IDR，也不需要丢弃（丢弃会在成片里留下音画空洞）。
-            createMuxerLocked()
+            //
+            // 首个分段建不出来就说明存储链路不可用，直接让 start() 失败：
+            // 不能像以前那样只记一条日志就继续跑编码器，那会变成「界面在录、
+            // 实际 0 文件」的假录（MTK 机型 mkdirs 被 FUSE 拒绝就踩这个）。
+            if (!createMuxerLocked()) {
+                // 预录交接路径下编码器已经归本类所有（调用方不会再释放），
+                // 这里必须自己收拾：先接管再 release，否则编码器与会话一起泄漏，
+                // 下次开录会因「编码器已被占用」直接失败。
+                if (preHandover != null) {
+                    videoCodec = preHandover.videoCodec
+                    releaseInternal()
+                }
+                return null
+            }
         }
 
         return try {
@@ -462,8 +519,16 @@ class SegmentRecorder(private val context: Context) {
             if (pendingRealtimeVideo.size == 1) {
                 Log.i(TAG, "muxer not ready, buffering realtime video from ${ptsUs / 1000}ms")
             }
+            // 超时判据：这么久还建不起 muxer，只能是存储写不进去。
+            // 不处理的话会一直缓存-丢弃到用户按停止，最后交出 0 个文件。
+            val now = SystemClock.elapsedRealtime()
+            if (pendingSinceMs == NO_PENDING) pendingSinceMs = now
+            if (now - pendingSinceMs > MUXER_READY_TIMEOUT_MS) {
+                reportFatal(lastCreateFailReason ?: Storage.FailReason.IO_ERROR)
+            }
             return
         }
+        pendingSinceMs = NO_PENDING
         if (!segment.acceptVideoSample(info.flags)) return
         segment.writeSample(
             segment.videoTrack,
@@ -614,19 +679,39 @@ class SegmentRecorder(private val context: Context) {
      *
      * ftyp+moov 在首个样本前落盘，数据按 moof+mdat 分片；进程被强杀时
      * 已写分片仍可直接播放。失败时保持 muxer == null，后续帧走缓存等待。
+     *
+     * @return 是否建成。首个分段失败（files 为空）会同时上报致命错误——
+     *   存储写不进去时不能继续假录。
      */
-    private fun createMuxerLocked() {
+    private fun createMuxerLocked(): Boolean {
         val name = "VID_${nameBase}_part${String.format(Locale.US, "%02d", segmentIndex)}.mp4"
-        val segment = Fmp4Segment.open(TAG, name, encryptPassphraseThisRun) {
+        val result = Fmp4Segment.open(TAG, name, encryptPassphraseThisRun) {
             Storage.createVideo(context, it)
         }
+        val segment = result.segment
         if (segment == null) {
             TriggerRouter.recordingSegmentName = ""
-            return
+            lastCreateFailReason = result.failReason ?: Storage.FailReason.IO_ERROR
+            // 第一个分段就建不出来 = 存储链路根本不可用，立即上报。
+            // 后续分段（切段时）失败则留给超时判据兜，因为此时已有成品文件，
+            // 不该把整场录制判死。
+            if (files.isEmpty() && segmentIndex == 0) {
+                reportFatal(lastCreateFailReason!!)
+            }
+            return false
         }
         muxer = segment
         TriggerRouter.recordingSegmentName = name
         files.add(segment.entry)
+        return true
+    }
+
+    /** 上报一次致命失败；同一次录制只报一次 */
+    private fun reportFatal(reason: Storage.FailReason) {
+        if (fatalReported) return
+        fatalReported = true
+        Log.e(TAG, "recording failed, storage unavailable: $reason")
+        onFatalError?.invoke(reason)
     }
 
     private fun startMuxerIfReadyLocked() {

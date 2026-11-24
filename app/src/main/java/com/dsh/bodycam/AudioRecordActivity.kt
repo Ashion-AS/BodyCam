@@ -222,7 +222,16 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
             return
         }
         if (!rec.start(SettingsStore.audioSegmentMinutes(this) * 60)) {
-            toast(getString(R.string.audio_start_failed))
+            // 带上具体原因：MTK 等 ROM 上「目录建不出来」和「麦克风打不开」
+            // 表现一样（都是启动失败），不区分的话用户只能干猜。
+            val msg = when (rec.lastCreateFailReason) {
+                Storage.FailReason.NO_PERMISSION -> R.string.record_failed_no_permission_short
+                Storage.FailReason.NOT_WRITABLE -> R.string.record_failed_not_writable_short
+                Storage.FailReason.NO_SPACE -> R.string.record_failed_no_space_short
+                Storage.FailReason.IO_ERROR -> R.string.record_failed_io_short
+                null -> R.string.audio_start_failed
+            }
+            toast(getString(msg))
             return
         }
         recording = true
