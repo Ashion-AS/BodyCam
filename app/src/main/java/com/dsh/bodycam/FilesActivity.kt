@@ -10,6 +10,8 @@ import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.ListView
 import android.widget.TextView
+import com.dsh.bodycam.core.TriggerRouter
+import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.util.Storage
 import com.dsh.bodycam.util.StoragePermission
 import java.text.SimpleDateFormat
@@ -75,6 +77,7 @@ class FilesActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ToastBar.release(this)
         scanExecutor.shutdown()
         super.onDestroy()
     }
@@ -132,7 +135,15 @@ class FilesActivity : Activity() {
     }
 
     private fun open(item: Storage.MediaFile) {
-        ViewerActivity.launch(this, item.file.absolutePath, kindOf(currentTab))
+        val kind = kindOf(currentTab)
+        // 正在写入的分段不能进播放页：MuxerFix 会整体重写/截断文件，而 muxer
+        // 还持有旧 FD，一改这一段就永久定格在重写那一刻。必须在这里拦下——
+        // 进了播放页再提示，Activity 已在 finishing，ToastBar 会直接丢弃。
+        if (kind != Storage.Kind.IMAGE && TriggerRouter.isRecordingSegment(item.file.name)) {
+            ToastBar.show(this, getString(R.string.viewer_segment_recording))
+            return
+        }
+        ViewerActivity.launch(this, item.file.absolutePath, kind)
     }
 
     // ------------------------------------------------------------ 适配器

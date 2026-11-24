@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
+import com.dsh.bodycam.core.TriggerRouter
 import com.dsh.bodycam.util.Storage
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -125,14 +126,13 @@ class SegmentRecorder(private val context: Context) {
         private set
 
     /**
-     * 当前正在写入的分段文件名（如 `VID_20261120_143022_part03.mp4`）；未录制时为空。
+     * 当前正在写入的分段文件名；未录制时为空。
      *
-     * 磁盘清理按「从旧到新」删文件，必须跳过这个——正在写的分段被删掉，
-     * 后面所有写入都会失败，且 muxer 还持有已删文件的 FD。
+     * 值本身存在 [TriggerRouter.recordingSegmentName]，这里只是给录制器内部
+     * （磁盘清理跳过当前段）留的只读视图，避免两处状态各存一份导致不同步。
      */
-    @Volatile
-    var currentSegmentName: String = ""
-        private set
+    val currentSegmentName: String
+        get() = TriggerRouter.recordingSegmentName
 
     private var sessionMicPeak = 0
 
@@ -621,11 +621,11 @@ class SegmentRecorder(private val context: Context) {
             Storage.createVideo(context, it)
         }
         if (segment == null) {
-            currentSegmentName = ""
+            TriggerRouter.recordingSegmentName = ""
             return
         }
         muxer = segment
-        currentSegmentName = name
+        TriggerRouter.recordingSegmentName = name
         files.add(segment.entry)
     }
 
@@ -682,7 +682,9 @@ class SegmentRecorder(private val context: Context) {
     private fun closeMuxerLocked() {
         val segment = muxer ?: return
         muxer = null
-        currentSegmentName = ""
+        // 先清进程级状态再 close：close 会写最后一片并可能耗时，
+        // 期间若有人来播放，不能再把它当成「正在写」而拒绝。
+        TriggerRouter.recordingSegmentName = ""
         // close() 会写出最后一个分片；没写过样本的空壳会自己 abort
         if (!segment.close()) files.remove(segment.entry)
     }

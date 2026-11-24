@@ -52,6 +52,20 @@ object TriggerRouter {
     var recording: Boolean = false
 
     /**
+     * 当前正在写入的分段文件名（如 `VID_20261120_143022_part03.mp4`）；未录制时为空。
+     *
+     * 由 [com.dsh.bodycam.record.SegmentRecorder] 在每段切换时更新。
+     * 播放链路必须拒绝对这个文件做任何后处理：MuxerFix 会重写/截断整个文件，
+     * 而 muxer 全程持有旧 FD，一改就把这一段永久写坏（不可恢复）。
+     */
+    @Volatile
+    var recordingSegmentName: String = ""
+
+    /** 该文件名是否为录制器当前正在写入的分段 */
+    fun isRecordingSegment(fileName: String): Boolean =
+        fileName.isNotEmpty() && fileName == recordingSegmentName
+
+    /**
      * 是否处于「按键归本应用」的状态。
      *
      * 用计算属性而不是手动赋值，避免多个页面来回切换时状态不同步

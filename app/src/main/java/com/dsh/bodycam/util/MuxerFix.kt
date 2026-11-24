@@ -1,6 +1,7 @@
 package com.dsh.bodycam.util
 
 import android.util.Log
+import com.dsh.bodycam.core.TriggerRouter
 import java.io.File
 import java.io.RandomAccessFile
 
@@ -48,8 +49,27 @@ internal object MuxerFix {
     /** sample_flags 里的 `sample_is_non_sync_sample` 位（bit16） */
     private const val NON_SYNC_FLAG = 0x10000L
 
+    /**
+     * 修补一个 fMP4 文件，四件事都是**幂等**的，已修好的文件不会被重写，
+     * 因此可以放心在录制收尾和播放前各调一次：
+     *  1. [patchSampleSyncFlags] 清音频轨的 non-sync 标志（无改动则只读）；
+     *  2. [patchTfdt] 注入 tfdt（已有则跳过，不重写文件）；
+     *  3. [patchMfra] 追写 mfra 索引（已有可用索引则跳过）；
+     *  4. [patchDurationFields] 回填 mvhd/tkhd/mdhd 的 duration
+     *     （逐字段比对，值相同就不写）。
+     *
+     * 幂等不只是省 IO：播放一个已修好的视频如果还重写文件，
+     * 它的 lastModified 会被刷成「刚刚」，文件列表的顺序就乱了。
+     */
     fun patchDurations(file: File) {
         if (!file.exists() || file.length() < 64) return
+        // 兜底：正在写入的分段绝不能碰。patchTfdt 会 tmp.renameTo 换掉 inode，
+        // 而 muxer 还持有旧 FD，之后所有写入都落进已 unlink 的文件里，
+        // 这一段就永久定格在重写那一刻的数据量（不可恢复）。
+        if (TriggerRouter.isRecordingSegment(file.name)) {
+            Log.w(TAG, "${file.name}: still recording, skip patch")
+            return
+        }
         synchronized(patchLock) {
             patchDurationsLocked(file)
         }
@@ -60,6 +80,18 @@ internal object MuxerFix {
         // 先补 tfdt 再建索引：注入会改变各 moof 的偏移，mfra 必须按新偏移重建
         patchTfdt(file)
         patchMfra(file)
+        patchDurationFields(file)
+    }
+
+    /**
+     * 把 moov 里为 0 的 duration 回填成真实值（谁读谁写）。
+     *
+     * 幂等性在这里格外重要：播放前也会跑一遍修补，如果每次都无条件写，
+     * 光是「打开一个已修好的视频」就会刷新文件的 lastModified。
+     * 所以先读现值，与算出来的目标一致就完全不碰文件——
+     * 连 [RandomAccessFile] 的写句柄都不会打开。
+     */
+    private fun patchDurationFields(file: File) {
         RandomAccessFile(file, "rw").use { raf ->
             val moov = findBox(raf, 0, raf.length(), "moov") ?: return
             val mvhd = findChild(raf, moov.bodyStart, moov.end, "mvhd") ?: return
@@ -71,6 +103,7 @@ internal object MuxerFix {
 
             var maxMovieDur = 0L
             var index = 0
+            var applied = 0
             var pos = moov.bodyStart
             while (pos < moov.end) {
                 val box = readBox(raf, pos, moov.end) ?: break
@@ -85,17 +118,20 @@ internal object MuxerFix {
                             val durUs = ticks * 1_000_000L / mediaTimescale
                             val movieDur = durUs * movieTimescale / 1_000_000L
                             maxMovieDur = maxOf(maxMovieDur, movieDur)
-                            writeU32(raf, mdhd.bodyStart + 16, ticks)
-                            if (tkhd != null) writeU32(raf, tkhd.bodyStart + 20, movieDur)
-                            Log.d(TAG, "track$index ticks=$ticks durUs=$durUs")
+                            if (writeU32IfChanged(raf, mdhd.bodyStart + 16, ticks)) applied++
+                            if (tkhd != null && writeU32IfChanged(raf, tkhd.bodyStart + 20, movieDur)) {
+                                applied++
+                            }
                         }
                     }
                     index++
                 }
                 pos = box.end
             }
-            writeU32(raf, mvhd.bodyStart + 16, maxMovieDur)
-            Log.d(TAG, "mvhd duration <- $maxMovieDur (timescale $movieTimescale)")
+            if (writeU32IfChanged(raf, mvhd.bodyStart + 16, maxMovieDur)) applied++
+            if (applied > 0) {
+                Log.i(TAG, "${file.name}: backfilled $applied duration field(s), mvhd=$maxMovieDur")
+            }
         }
     }
 
@@ -1137,5 +1173,20 @@ internal object MuxerFix {
     private fun writeU32(raf: RandomAccessFile, at: Long, value: Long) {
         raf.seek(at)
         raf.writeInt((value and 0xFFFFFFFFL).toInt())
+    }
+
+    /**
+     * 只有现值与目标不同才写，返回是否真的写了。
+     *
+     * 用于 duration 回填：已修好的文件再跑一遍修补时完全不产生写操作，
+     * 文件的 lastModified 与内容都保持原样。
+     */
+    private fun writeU32IfChanged(raf: RandomAccessFile, at: Long, value: Long): Boolean {
+        val current = u32(raf, at).toLong() and 0xFFFFFFFFL
+        val target = value and 0xFFFFFFFFL
+        if (current == target) return false
+        raf.seek(at)
+        raf.writeInt(target.toInt())
+        return true
     }
 }

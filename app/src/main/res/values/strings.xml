@@ -87,6 +87,7 @@
     <string name="files_need_permission">需要「所有文件访问」权限才能读取文件</string>
     <string name="viewer_image_failed">图片打不开</string>
     <string name="viewer_play_failed">文件打不开</string>
+    <string name="viewer_segment_recording">该分段正在录制中，请等本段结束后再播放</string>
     <string name="viewer_loading">正在加载…</string>
     <string name="viewer_passphrase_title">该录像已加密</string>
     <string name="viewer_passphrase_hint">请输入录制时设置的 32 位录像密钥</string>

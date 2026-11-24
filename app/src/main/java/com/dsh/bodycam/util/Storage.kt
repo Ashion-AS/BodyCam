@@ -159,14 +159,37 @@ object Storage {
     class MediaFile(val file: File) {
         val name: String get() = file.name
         val length: Long get() = file.length()
-        val modified: Long get() = file.lastModified()
+
+        /**
+         * 录制时间，从文件名里的 `yyyyMMdd_HHmmss` 解析。
+         *
+         * 不能用 [File.lastModified]：播放视频时会跑 MuxerFix 回填 duration 并重写
+         * 整个文件，修改时间被刷成「刚才」，列表里那条就跳到第一位了。
+         * 文件名是录制时定下的、之后不再变，才是稳定的时间来源。
+         */
+        val modified: Long = parseRecordTime(file)
+    }
+
+    /** 文件名里的时间戳片段（`20261120_143022`），三段式前缀之后不一定紧跟，靠正则找 */
+    private val RECORD_STAMP = Regex("""(\d{8}_\d{6})""")
+
+    /** 解析文件名中的录制时间；解析不出来（异常命名）才退回文件修改时间 */
+    private fun parseRecordTime(file: File): Long {
+        val match = RECORD_STAMP.find(file.name) ?: return file.lastModified()
+        return try {
+            SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).parse(match.value)?.time
+                ?: file.lastModified()
+        } catch (_: Exception) {
+            file.lastModified()
+        }
     }
 
     /**
      * 列出某类型下的所有文件，最新的在最上面。
      *
-     * 先比文件修改时间，时间相同（粗粒度文件系统）再按文件名倒序；
-     * 文件名的 stamp 精度到毫秒，同秒连拍也不会乱序。
+     * 按文件名里的录制时间倒序（见 [MediaFile.modified]），不按文件修改时间：
+     * 播放视频会触发 MuxerFix 重写文件，修改时间不再代表录制时间。
+     * 时间相同（同一秒开录的多段）再按文件名倒序，文件名精度到毫秒，不会乱序。
      *
      * @return 没有权限时返回空列表，由调用方提示
      */
@@ -182,7 +205,7 @@ object Storage {
             } ?: continue
             files.forEach { out += MediaFile(it) }
         }
-        // 最新在最上：先按修改时间倒序，时间相同（粗粒度文件系统）再按名字倒序
+        // 最新在最上：按 filename 里的录制时间倒序，时间相同再按名字倒序
         out.sortWith(
             compareByDescending<MediaFile> { it.modified }.thenByDescending { it.name }
         )
