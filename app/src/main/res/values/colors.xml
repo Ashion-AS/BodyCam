@@ -62,6 +62,13 @@
     <color name="scrim_panel">#800D1013</color>
     <color name="scrim_well">#E60D1013</color>
 
+    <!--
+      底部操作坞专用：比 scrim_well 透一档（约 65%），让取景画面透出来一些。
+      图标本身带 bg_dock_button 实底、文字带阴影，压在半透明底上仍读得清，
+      所以这里可以比「接近实底」放宽。提示条仍需 scrim_well 那种实底，不共用。
+    -->
+    <color name="scrim_dock">#A60D1013</color>
+
     <!-- 纯白仅用于快门闪光：那是功能性的全屏闪一下，不是配色 -->
     <color name="flash">#FFFFFF</color>
 

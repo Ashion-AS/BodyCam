@@ -43,8 +43,10 @@
             android:layout_height="wrap_content"
             android:background="@drawable/bg_top_bar"
             android:minHeight="@dimen/top_bar_height"
-            android:paddingHorizontal="@dimen/space_md"
-            android:paddingVertical="@dimen/space_xs">
+            android:paddingStart="@dimen/space_md"
+            android:paddingTop="@dimen/space_xs"
+            android:paddingEnd="@dimen/space_2xs"
+            android:paddingBottom="@dimen/space_xs">
 
             <!-- 左：两行上下居中——上为仪器读数，下为录像计时 -->
             <LinearLayout
