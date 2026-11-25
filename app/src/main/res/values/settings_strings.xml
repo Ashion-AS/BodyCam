@@ -89,6 +89,15 @@
     <string name="settings_video_fps_summary">帧率越高画面越流畅，码率与功耗也越高</string>
     <string name="settings_video_quality_title">录像画质</string>
     <string name="settings_video_quality_summary">码率随分辨率与帧率自动换算：4K 高档约 25Mbps，1080P 高档约 6Mbps</string>
+    <string name="settings_video_codec_title">视频编码</string>
+    <string name="settings_video_codec_summary">H.265 同画质约省一半体积，但回放需要设备支持；不确定就选 H.264</string>
+    <string name="settings_video_codec_unsupported">当前设备只有 H.264 编码器，无法选择 H.265</string>
+    <string name="settings_audio_sample_rate_title">音频采样率</string>
+    <string name="settings_audio_sample_rate_fmt">%1$d kHz</string>
+    <string name="settings_audio_sample_rate_summary">16k 适合人声、文件更小；48k 保留更多环境声细节，体积约三倍</string>
+    <string name="settings_audio_channels_title">音频声道</string>
+    <string name="settings_audio_channels_summary">双声道需要设备有立体声麦克风，没有时会自动回退单声道</string>
+    <string name="settings_audio_channels_unsupported">当前设备的麦克风只支持单声道</string>
     <string name="settings_segment_title">分段时长</string>
     <string name="settings_segment_fmt">%1$d 分钟</string>
     <string name="settings_segment_summary">每隔这么久换一个新文件；切换在关键帧处进行，不丢画面</string>

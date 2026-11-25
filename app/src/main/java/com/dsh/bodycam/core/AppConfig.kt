@@ -2,9 +2,6 @@ package com.dsh.bodycam.core
 
 /** 集中放置可调参数：改分辨率、码率、水印位置都只需要动这里 */
 object AppConfig {
-    const val AUDIO_BITRATE = 128_000
-    const val AUDIO_SAMPLE_RATE = 48_000
-
     /** 水印四角的边距，占画面宽度的比例 */
     const val WATERMARK_MARGIN = 0.020f
 
@@ -32,6 +29,52 @@ object AppConfig {
     /** 默认档位下标：1080P */
     const val VIDEO_SIZE_DEFAULT_INDEX = 1
 
+    // ------------------------------------------------------------ 视频编码格式
+
+    /**
+     * 视频编码格式档位。
+     *
+     * H.265（HEVC）在同等画质下比 H.264 省约一半码率，但**不是所有设备都有
+     * 编码器**——旧机、部分低端机只有解码器没有编码器。选择项由
+     * [com.dsh.bodycam.record.CodecSupport.supportedVideoCodecs] 按设备能力
+     * 过滤，不支持的格式不会出现在设置页。
+     */
+    const val VIDEO_CODEC_AVC = 0
+    const val VIDEO_CODEC_HEVC = 1
+
+    /** 视频编码档位的显示名；顺序与 [VIDEO_CODEC_*] 对应 */
+    val VIDEO_CODEC_LABELS = listOf("H.264", "H.265")
+
+    /** 默认视频编码：H.264，兼容性最好 */
+    const val VIDEO_CODEC_DEFAULT = VIDEO_CODEC_AVC
+
+    // ------------------------------------------------------------ 音频参数
+
+    /**
+     * 音频采样率档位（Hz）。
+     *
+     * 16k 是语音场景的常用档：文件小、编码开销低，人声清晰度足够；
+     * 48k 是系统默认档，音乐/环境声更完整。16k 由 48k 直接降采样得到，
+     * 不改变采集链路本身。
+     */
+    val AUDIO_SAMPLE_RATE_OPTIONS = intArrayOf(16_000, 48_000)
+
+    /** 默认采样率：16k（语音优先，文件更小） */
+    const val AUDIO_SAMPLE_RATE_DEFAULT = 16_000
+
+    /** 声道档位：单声道 / 双声道 */
+    const val AUDIO_CHANNELS_MONO = 1
+    const val AUDIO_CHANNELS_STEREO = 2
+
+    /** 声道档位列表；顺序与 [AUDIO_CHANNELS_LABELS] 对应 */
+    val AUDIO_CHANNELS_OPTIONS = intArrayOf(AUDIO_CHANNELS_MONO, AUDIO_CHANNELS_STEREO)
+
+    /** 声道档位的显示名；顺序与 [AUDIO_CHANNELS_*] 对应 */
+    val AUDIO_CHANNELS_LABELS = listOf("单声道", "双声道")
+
+    /** 默认声道：单声道 */
+    const val AUDIO_CHANNELS_DEFAULT = AUDIO_CHANNELS_MONO
+
     /** 录像帧率档位 */
     val VIDEO_FPS_OPTIONS = intArrayOf(15, 20, 25, 30, 60)
     const val DEFAULT_VIDEO_FPS = 30
@@ -50,22 +93,33 @@ object AppConfig {
     /** 各画质档对应的「每像素每帧比特数」 */
     private val QUALITY_BPP = floatArrayOf(0.10f, 0.06f, 0.035f)
 
+    /**
+     * HEVC 相对 H.264 的码率系数。
+     *
+     * 同码率下 HEVC 的画质明显更好，反过来要拿到与 H.264 相当的画质，
+     * 大约只需 0.6~0.7 的码率。这里取 0.65，让用户切到 H.265 时
+     * 体积能实打实地降下来，而不是跟 H.264 一样大。
+     */
+    private const val HEVC_BITRATE_FACTOR = 0.65f
+
     /** 码率下限 / 上限，避免极端组合算出离谱的值 */
     private const val BITRATE_MIN = 1_000_000
     private const val BITRATE_MAX = 60_000_000
 
     /**
-     * 按分辨率、帧率与画质档算目标码率。
+     * 按分辨率、帧率、画质档与编码格式算目标码率。
      *
      * 结果按 0.5Mbps 取整，同档位在不同分辨率/帧率下都落在合理区间：
      * 1080P30 高档 ≈ 6.2Mbps，4K30 高档 ≈ 24.9Mbps，720P30 低档 ≈ 1.8Mbps。
+     * HEVC 在同样参数下乘 [HEVC_BITRATE_FACTOR]，体积约为 H.264 的 65%。
      */
-    fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
+    fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int, codecType: Int): Int {
         val bpp = QUALITY_BPP.getOrElse(quality) { QUALITY_BPP[VIDEO_QUALITY_HIGH] }
+        val codecFactor = if (codecType == VIDEO_CODEC_HEVC) HEVC_BITRATE_FACTOR else 1f
         // 先算整数像素×帧率，最后再乘浮点系数：Long×Float 的结果是 Float，
         // 直接参与 coerceIn(Long, Long) 会类型不匹配
         val pixels = width.toLong() * height * fps
-        val raw = (pixels * bpp).toLong()
+        val raw = (pixels * bpp * codecFactor).toLong()
         val clamped = raw.coerceIn(BITRATE_MIN.toLong(), BITRATE_MAX.toLong())
         // 向下取整到 0.5Mbps，避免出现 6234567 这种没有意义的精度
         val halfMb = 500_000L

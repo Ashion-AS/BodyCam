@@ -184,6 +184,98 @@
                     android:text="@string/settings_video_quality_summary" />
             </LinearLayout>
 
+            <!-- 行 3.1：视频编码格式（H.264 / H.265，按设备能力过滤） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_video_codec_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgVideoCodec"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    android:id="@+id/tvVideoCodecHint"
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_video_codec_summary" />
+            </LinearLayout>
+
+            <!-- 行 3.2：音频采样率（16k / 48k） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_audio_sample_rate_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgAudioSampleRate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_audio_sample_rate_summary" />
+            </LinearLayout>
+
+            <!-- 行 3.3：音频声道（单声道 / 双声道） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_audio_channels_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgAudioChannels"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    android:id="@+id/tvAudioChannelsHint"
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_audio_channels_summary" />
+            </LinearLayout>
+
             <!-- 行 4：视频声音开关 -->
             <LinearLayout
                 android:layout_width="match_parent"

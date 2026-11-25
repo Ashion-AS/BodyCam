@@ -68,6 +68,9 @@ class AudioRecorder(private val context: Context) {
     private var muxer: Fmp4Segment? = null
     private var audioFormat: MediaFormat? = null
 
+    /** 本次录音的采样率/声道；[start] 时定下，中途改设置不影响本次 */
+    private var audioConfigThisRun: AudioConfig = AudioConfig.DEFAULT
+
     /** 分段时长与序号；PTS 相对每段起点重新计算，保证单文件内从 0 单调递增 */
     private var segmentDurationUs = AppConfig.DEFAULT_AUDIO_SEGMENT_SECONDS * US_PER_SECOND
     private var segmentIndex = 0
@@ -103,7 +106,10 @@ class AudioRecorder(private val context: Context) {
      * @param segmentSeconds 单个文件的分段时长（秒），默认 [AppConfig.DEFAULT_AUDIO_SEGMENT_SECONDS]。
      * @return 权限不足或初始化失败返回 false，失败时已建资源释放干净。
      */
-    fun start(segmentSeconds: Int = AppConfig.DEFAULT_AUDIO_SEGMENT_SECONDS): Boolean {
+    fun start(
+        segmentSeconds: Int = AppConfig.DEFAULT_AUDIO_SEGMENT_SECONDS,
+        audioConfig: AudioConfig = AudioConfig.DEFAULT
+    ): Boolean {
         synchronized(lock) {
             if (running) return false
             entries.clear()
@@ -114,10 +120,11 @@ class AudioRecorder(private val context: Context) {
             lastCreateFailReason = null
             segmentDurationUs = segmentSeconds.coerceAtLeast(1) * US_PER_SECOND
             nameBase = Storage.stamp()
+            audioConfigThisRun = audioConfig
         }
 
         val (newCodec, newRecord) = try {
-            openAudioCapture(context)
+            openAudioCapture(context, audioConfig)
         } catch (e: Exception) {
             Log.e(TAG, "open audio capture failed", e)
             return false
@@ -198,9 +205,10 @@ class AudioRecorder(private val context: Context) {
                     readFailures = 0
                     // 送进编码器的 PTS 用绝对时基（随采样帧数单调递增），
                     // 输出端再按每段起点换算成单文件内的相对时间轴。
-                    val ptsUs = frames * US_PER_SECOND / SAMPLE_RATE
-                    frames += read.toLong() / PCM_BYTES_PER_FRAME
-                    feedAudio(codec, pcm, read, ptsUs)
+                    val cfg = audioConfigThisRun
+                    val ptsUs = frames * US_PER_SECOND / cfg.sampleRate
+                    frames += read.toLong() / cfg.pcmBytesPerFrame
+                    feedAudio(codec, pcm, read, ptsUs, cfg)
                     lastPtsUs = ptsUs
                     emitLevel(pcm, read)
                 } else {

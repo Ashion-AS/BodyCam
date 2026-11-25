@@ -3,11 +3,11 @@ package com.dsh.bodycam.record
 import android.content.Context
 import android.media.AudioRecord
 import android.media.MediaCodec
-import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
+import com.dsh.bodycam.core.AppConfig
 
 /**
  * 预录环形缓存（视频 + 音频）。
@@ -89,21 +89,45 @@ class PreRecordBuffer(private val context: Context) {
     @Volatile
     private var fps = 30
 
+    // 启动时的编码参数；对外只通过 matches() 判断是否需要重启，
+// 不再逐个字段暴露——多点比对容易漏项（曾经就漏过编码格式与音频参数）
+
     /** 启动时的编码尺寸，旋转/画幅变化后由调用方重启 */
-    var startedWidth = 0
-        private set
-    var startedHeight = 0
-        private set
+    private var startedWidth = 0
+    private var startedHeight = 0
 
     /** 启动时的编码参数，设置页改了这些也要重启缓存（交接的帧必须与新编码器一致） */
-    var startedFps = 0
-        private set
-    var startedBitrate = 0
-        private set
-    var startedAudio = false
-        private set
+    private var startedFps = 0
+    private var startedBitrate = 0
+    private var startedAudio = false
+
+    /** 当前缓存用的视频编码档位；交接时必须与录制器一致 */
+    private var startedCodecType = AppConfig.VIDEO_CODEC_DEFAULT
+
+    /** 当前缓存用的音频参数；交接时必须与录制器一致 */
+    private var startedAudioConfig: AudioConfig = AudioConfig.DEFAULT
 
     val isRunning: Boolean get() = capturing
+
+    /**
+     * 当前缓存参数与给定参数是否完全一致。
+     *
+     * 交接给录制器的编码器会被直接接管，尺寸/帧率/码率/编码格式/声音开关/
+     * 音频参数任一项不一致都会让成片规格与设置不符、或让音轨参数错位，
+     * 所以调用方只在参数一致时才允许交接，否则先 [release] 再重新 [start]。
+     */
+    fun matches(
+        width: Int,
+        height: Int,
+        fps: Int,
+        bitrate: Int,
+        audio: Boolean,
+        codecType: Int,
+        audioConfig: AudioConfig
+    ): Boolean = startedWidth == width && startedHeight == height &&
+            startedFps == fps.coerceAtLeast(1) && startedBitrate == bitrate &&
+            startedAudio == audio && startedCodecType == codecType &&
+            startedAudioConfig.matches(audioConfig)
 
     /**
      * 启动缓存。返回视频编码器输入 Surface（GL 往这里画），失败返回 null。
@@ -115,15 +139,17 @@ class PreRecordBuffer(private val context: Context) {
         fps: Int,
         bitrate: Int,
         keepSeconds: Int,
-        withAudio: Boolean = true
+        withAudio: Boolean = true,
+        codecType: Int = AppConfig.VIDEO_CODEC_DEFAULT,
+        audioConfig: AudioConfig = AudioConfig.DEFAULT
     ): Surface? {
         synchronized(lock) {
             if (capturing) {
-                // 已在跑：尺寸或编码参数任一对不上就要求调用方先 release 再 start，
+                // 已在跑：参数任一对不上就要求调用方先 release 再 start，
                 // 否则交接给录制器的帧格式与录制器新起的编码器不一致
-                val same = startedWidth == width && startedHeight == height &&
-                        startedFps == fps.coerceAtLeast(1) && startedBitrate == bitrate &&
-                        startedAudio == withAudio
+                val same = matches(
+                    width, height, fps, bitrate, withAudio, codecType, audioConfig
+                )
                 return if (same) videoSurface else null
             }
             bufferSeconds = keepSeconds
@@ -131,6 +157,8 @@ class PreRecordBuffer(private val context: Context) {
             this.startedFps = this.fps
             this.startedBitrate = bitrate
             this.startedAudio = withAudio
+            this.startedCodecType = codecType
+            this.startedAudioConfig = audioConfig
             videoQueue.clear()
             audioQueue.clear()
             videoFormat = null
@@ -272,20 +300,7 @@ class PreRecordBuffer(private val context: Context) {
         fps: Int,
         bitrate: Int
     ): Surface {
-        val f = MediaFormat.createVideoFormat(VIDEO_MIME, width, height).apply {
-            setInteger(
-                MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
-            )
-            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
-            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            // 1s 一个 I 帧：交接切片时保证第一帧是关键帧
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-        }
-        val c = MediaCodec.createEncoderByType(VIDEO_MIME)
-        c.configure(f, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        val s = c.createInputSurface()
-        c.start()
+        val (c, s) = openVideoEncoder(startedCodecType, width, height, fps, bitrate)
         synchronized(lock) {
             videoCodec = c
             videoSurface = s
@@ -296,7 +311,7 @@ class PreRecordBuffer(private val context: Context) {
     }
 
     private fun startAudioCodecInternal() {
-        val (c, record) = openAudioCapture(context)
+        val (c, record) = openAudioCapture(context, startedAudioConfig)
         synchronized(lock) {
             audioCodec = c
             audioRecord = record
@@ -380,9 +395,10 @@ class PreRecordBuffer(private val context: Context) {
                         // （相机 SurfaceTexture 时间戳）同源，交接后可直接对齐
                         startUs = SystemClock.elapsedRealtimeNanos() / 1000
                     }
-                    val ptsUs = startUs + frames * US_PER_SECOND / SAMPLE_RATE
-                    frames += read.toLong() / PCM_BYTES_PER_FRAME
-                    feedAudio(codec, pcm, read, ptsUs)
+                    val cfg = startedAudioConfig
+                    val ptsUs = startUs + frames * US_PER_SECOND / cfg.sampleRate
+                    frames += read.toLong() / cfg.pcmBytesPerFrame
+                    feedAudio(codec, pcm, read, ptsUs, cfg)
                 }
             }
 

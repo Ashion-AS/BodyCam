@@ -30,8 +30,10 @@ import com.dsh.bodycam.core.TriggerRouter
 import com.dsh.bodycam.gl.GlPipeline
 import com.dsh.bodycam.key.TriggerReceiver
 import com.dsh.bodycam.light.LightController
+import com.dsh.bodycam.record.AudioConfig
 import com.dsh.bodycam.record.PreRecordBuffer
 import com.dsh.bodycam.record.SegmentRecorder
+import com.dsh.bodycam.record.audioConfigFromSettings
 import com.dsh.bodycam.service.KeepAliveService
 import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.util.BatteryGuard
@@ -119,6 +121,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     /** 设备上所有可用摄像头（后摄在前），多于一个才显示切换入口 */
     private var cameras: List<CameraSpec> = emptyList()
+
+    /** [cameras] 枚举时用的视频编码档位；设置改了要重新枚举，编码器尺寸上限不同 */
+    private var camerasCodecType: Int = AppConfig.VIDEO_CODEC_DEFAULT
 
     /** 补光灯的相机通路；LightController 建好后注入，销毁时注销 */
     private val torchPath = TorchPath()
@@ -560,6 +565,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         if (pipeline != null) return
         firstFrameSeen = false
         cameras = CameraController.listCameras(this)
+        camerasCodecType = SettingsStore.videoCodec(this)
         val savedId = SettingsStore.cameraId(this)
         // 从已枚举的列表里挑，避免再扫一遍 CameraCharacteristics
         val spec = cameras.firstOrNull { it.cameraId == savedId }
@@ -846,13 +852,12 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         }
         val enabled = SettingsStore.isPreRecordEnabled(this)
         val params = videoParams()
-        // 尺寸、帧率、码率、声音开关任一对不上都要重启缓存：
+        // 尺寸、帧率、码率、声音开关、编码格式任一对不上都要重启缓存：
         // 交接给录制器的编码器与录制器新起的编码器必须参数一致
-        val mismatch = buf.isRunning && (
-                buf.startedWidth != videoW || buf.startedHeight != videoH ||
-                        buf.startedFps != params.fps || buf.startedBitrate != params.bitrate ||
-                        buf.startedAudio != params.audio
-                )
+        val mismatch = buf.isRunning && !buf.matches(
+            videoW, videoH, params.fps, params.bitrate,
+            params.audio, params.codecType, params.audioConfig
+        )
         if (enabled && !recording && (!buf.isRunning || mismatch)) {
             if (buf.isRunning) {
                 buf.release()
@@ -862,7 +867,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
                 videoW, videoH, params.fps, params.bitrate,
                 SettingsStore.preRecordSeconds(this),
                 // 视频声音关掉时预录也不采音频：交接时不会有 AAC 帧塞进新音轨
-                withAudio = params.audio
+                withAudio = params.audio,
+                codecType = params.codecType,
+                audioConfig = params.audioConfig
             )
             if (surface != null) p.setPreRecordSurface(surface)
         } else if ((!enabled || recording) && buf.isRunning) {
@@ -952,23 +959,28 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         val fps: Int,
         val bitrate: Int,
         val segmentSeconds: Int,
-        val audio: Boolean
+        val audio: Boolean,
+        val codecType: Int,
+        val audioConfig: AudioConfig
     )
 
     /**
      * 按当前设置与画幅算本次录像参数。
      *
-     * 码率由 [AppConfig.videoBitrate] 按「分辨率 × 帧率 × 画质」现算，
-     * 所以分辨率或帧率变了码率会跟着变，不需要单独配。
+     * 码率由 [AppConfig.videoBitrate] 按「分辨率 × 帧率 × 画质 × 编码格式」现算，
+     * 所以分辨率、帧率或编码格式变了码率会跟着变，不需要单独配。
      */
     private fun videoParams(): VideoParams {
         val fps = SettingsStore.videoFps(this)
         val quality = SettingsStore.videoQuality(this)
+        val codecType = SettingsStore.videoCodec(this)
         return VideoParams(
             fps = fps,
-            bitrate = AppConfig.videoBitrate(videoW, videoH, fps, quality),
+            bitrate = AppConfig.videoBitrate(videoW, videoH, fps, quality, codecType),
             segmentSeconds = SettingsStore.segmentMinutes(this) * 60,
-            audio = SettingsStore.isVideoAudioEnabled(this)
+            audio = SettingsStore.isVideoAudioEnabled(this),
+            codecType = codecType,
+            audioConfig = audioConfigFromSettings(this)
         )
     }
 
@@ -1012,6 +1024,15 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private fun applyVideoSettings() {
         // 分段时长即时生效：只改下一个分段边界，不影响正在写的这段
         if (recording) recorder?.setSegmentSeconds(SettingsStore.segmentMinutes(this) * 60)
+        // 编码格式变了，各档位能编得动的尺寸上限跟着变：重枚举摄像头，
+        // 当前用的那颗也换成新枚举出来的（否则还在用旧上限算出的流尺寸）。
+        // 录像期间不动，等停录收尾时再补。
+        if (!recording && !savingSegment) {
+            val codecType = SettingsStore.videoCodec(this)
+            if (codecType != camerasCodecType) {
+                refreshCameras(codecType)
+            }
+        }
         // 录像期间不能动相机会话，等停录收尾时（onSegmentSaved）再补；
         // 其余参数只影响编码器，由 startRecording 现读，无需在这里处理
         if (!recording && !savingSegment) {
@@ -1022,6 +1043,29 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         // 预录缓存要跟设置保持一致，且不受录像状态限制：
         // 录中改参数时缓存本来就已交接/释放，这里只是刷新黄点
         applyPreRecordSetting()
+    }
+
+    /**
+     * 重新枚举摄像头列表（编码格式变了才需要：编码器尺寸上限随之改变）。
+     *
+     * 枚举结果里带 `encoderMaxW/H`，[resolvedVideoSize] 靠它剔掉编不动的档位；
+     * 不重枚举的话，从 H.265 切回 H.264 还会按旧的（更小的）上限限制分辨率。
+     *
+     * 当前选中的摄像头从新列表里按 id 找回，找不到就退回后摄。
+     */
+    private fun refreshCameras(codecType: Int) {
+        val newList = CameraController.listCameras(this)
+        if (newList.isEmpty()) return
+        cameras = newList
+        camerasCodecType = codecType
+        // 只换 spec（新的 encoderMaxW/H），不动 streamW/H：
+        // 让后面的 syncStreamSizeToSettings 自己比对出差异并触发重建，
+        // 否则这里先把尺寸改了，那边就认为「没变」而漏掉 SurfaceTexture 重建。
+        val currentId = currentSpec?.cameraId
+        currentSpec = newList.firstOrNull { it.cameraId == currentId }
+            ?: newList.firstOrNull { !it.isFront }
+            ?: newList.first()
+        currentSpec?.let { updateCameraButtons() }
     }
 
     /** 把相机画面转正所需的角度：传感器方向 - 屏幕方向 */
@@ -1357,9 +1401,10 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         val handover = preRecordBuffer?.takeIf { it.isRunning }?.let { buf ->
             // 尺寸或编码参数对不上就不能交接：交接的编码器会被录制器直接接管，
             // 它的实际 fps/码率与本次设置的参数不一致会污染成片规格
-            val compatible = buf.startedWidth == videoW && buf.startedHeight == videoH &&
-                    buf.startedFps == params.fps && buf.startedBitrate == params.bitrate &&
-                    buf.startedAudio == params.audio
+            val compatible = buf.matches(
+                videoW, videoH, params.fps, params.bitrate,
+                params.audio, params.codecType, params.audioConfig
+            )
             if (!compatible) {
                 buf.release()
                 null
@@ -1382,7 +1427,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             // 开录时定下加密口令，整段录制的所有分段共用同一个
             if (SettingsStore.isVideoEncryptActive(this)) {
                 SettingsStore.videoEncryptPassphrase(this)
-            } else null
+            } else null,
+            params.codecType,
+            params.audioConfig
         )
         if (surface == null) {
             // 交接出去的编码器归录制器管，失败时得由录制器释放；这里只需提示。

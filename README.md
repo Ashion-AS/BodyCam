@@ -36,6 +36,8 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 循环录像 / 磁盘兜底 | `DiskGuard`：剩余空间低于阈值时删最早的已结束分段，或安全停录（见「八点十」） |
 | 低电量兜底 | `BatteryGuard`：电量低于阈值时提示，接近耗尽时安全停录；充电中不触发，息屏同样生效（见「八点十之二」） |
 | 录像参数可配 | 分辨率（4K/1080P/720P/D1，按设备能力回退）、帧率（15–60）、画质（高/中/低，码率自动换算）、分段时长（5–30 分钟）、视频声音开关，全部持久化（见「八点十二」） |
+| 视频编码可选 | 设备有 H.265 编码器时可选 H.264 / H.265，默认 H.264；分辨率档位按所选编码器的能力上限回退（见「八点十一之二」） |
+| 音频参数可选 | 采样率 16k / 48k（默认 16k）、声道单/双（默认单声道）；不支持的档位不出现在设置页（见「八点十一之二」） |
 | 照片烧水印 | `PhotoWatermarker`：EXIF 转正 → 叠水印 → 重编码 |
 | 预录（5/10/20/30 秒可调） | `PreRecordBuffer` 常驻编码 + 环形缓存，按键瞬间交接进正式录像（见「八点五」） |
 | 预录开启提示 | 顶栏右侧**黄点**（`preRecordDot`），设置页可开关 |
@@ -1149,28 +1151,34 @@ patchMfra()              → 按新偏移追写 mfra 随机访问索引（八点
 
 ### 码率怎么算
 
-码率不写死，按「分辨率 × 帧率 × 每像素每帧比特数」现算，再向下取整到 0.5Mbps：
+码率不写死，按「分辨率 × 帧率 × 每像素每帧比特数 × 编码系数」现算，再向下取整到 0.5Mbps：
 
 ```kotlin
-fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int): Int {
+fun videoBitrate(width: Int, height: Int, fps: Int, quality: Int, codecType: Int): Int {
     val bpp = QUALITY_BPP[quality]              // 0.10 / 0.06 / 0.035
-    val raw = (width.toLong() * height * fps * bpp).toLong()
+    val codecFactor = if (codecType == VIDEO_CODEC_HEVC) 0.65f else 1f
+    val raw = (width.toLong() * height * fps * bpp * codecFactor).toLong()
     val clamped = raw.coerceIn(1_000_000L, 60_000_000L)
     return ((clamped / 500_000L) * 500_000L).toInt()
 }
 ```
 
-实测换算（30fps）：
+实测换算（30fps，H.264 / HEVC）：
 
 | 分辨率 | 高 | 中 | 低 |
 | --- | --- | --- | --- |
-| 4K | 24.5 Mbps | 14.5 Mbps | 8.5 Mbps |
-| 1080P | 6.0 Mbps | 3.5 Mbps | 2.0 Mbps |
-| 720P | 2.5 Mbps | 1.5 Mbps | 1.0 Mbps |
-| D1 | 1.0 Mbps | 1.0 Mbps | 1.0 Mbps |
+| 4K | 24.5 / 15.5 Mbps | 14.5 / 9.5 Mbps | 8.5 / 5.5 Mbps |
+| 1080P | 6.0 / 3.5 Mbps | 3.5 / 2.0 Mbps | 2.0 / 1.5 Mbps |
+| 720P | 2.5 / 1.5 Mbps | 1.5 / 1.0 Mbps | 1.0 / 1.0 Mbps |
+| D1 | 1.0 / 1.0 Mbps | 1.0 / 1.0 Mbps | 1.0 / 1.0 Mbps |
 
 > 不写死常数的原因：4K 用 1080P 的码率会糊成一片，720P 用 4K 的码率只是白白
 > 占空间。BPP 系数是 H.264 的常见取值，需要按机器实际表现调就改 `QUALITY_BPP`。
+>
+> `HEVC_BITRATE_FACTOR = 0.65` 的理由：`KEY_BIT_RATE` 是编码器的目标码率，
+> 编码器会按这个值出流，所以**只换编码格式不同时改码率，文件体积不会变小**——
+> 换来的是同体积下更好的画质。HEVC 在同画质下约需 H.264 的 60%~70% 码率，
+> 因此这里乘 0.65，让切到 H.265 时体积能实打实地降下来。
 
 ### 视频声音关掉时
 
@@ -1283,6 +1291,75 @@ chunk* N 个块           每块 = IV(12B) || 密文(≤64KB) || Tag(16B)
 
 ---
 
+## 八点十一之二、编码设置（H.264/H.265 与音频采样率/声道）
+
+设置页「录像」分组下三行，全部**按设备能力过滤选项**：机器做不到的档位不出现，
+避免选了根本编不了/采不到的档位，开录即失败。
+
+| 设置项 | 档位 | 默认 | 能力探测 |
+| --- | --- | --- | --- |
+| 视频编码 | H.264 / H.265 | H.264 | `MediaCodecList` 里是否有该 MIME 的 **encoder** |
+| 音频采样率 | 16 kHz / 48 kHz | 16 kHz | `AudioRecord.getMinBufferSize() > 0` |
+| 音频声道 | 单声道 / 双声道 | 单声道 | 同上，`CHANNEL_IN_MONO` / `CHANNEL_IN_STEREO` |
+
+**为什么默认 H.264**：所有 Android 设备都保证有 H.264 编码器；HEVC 在部分旧机、
+低端机上只有解码器没有编码器。默认值选兼容性最好的那个。
+
+**为什么默认 16k**：执法记录以人声为主，16k 已足够清晰，文件体积约为 48k 的三分之一。
+16k 由编码器侧直接按 16k 配置 AAC，不额外做重采样。
+
+### 选项为何要按能力过滤
+
+选了「编不动」的档位，`MediaCodec.configure()` 会直接抛异常，表现是「点录像没反应」，
+用户完全看不出原因。过滤后退化成「这项没得选」，原因写在提示行里
+（`settings_video_codec_unsupported` / `settings_audio_channels_unsupported`）。
+
+探测结果在 `CodecSupport.kt` 里缓存：`MediaCodecList` 只枚举一次
+（`encoderMimes`），否则每读一次设置都扫一遍编码器，`videoParams()` 这类高频
+路径会明显变慢。`AudioRecord.getMinBufferSize()` 便宜且不占麦克风，不缓存。
+
+### 编码格式影响分辨率上限
+
+同一台机器上 H.265 编码器的尺寸上限**通常小于** H.264。所以：
+
+- `CameraController.buildSpec()` 按**当前设置的编码格式**查上限
+  （`videoEncoderMaxSize(codecType)`，按编码格式缓存）；
+- 设置页改编码格式后，`MainActivity.applyVideoSettings()` 会重新枚举摄像头
+  （`refreshCameras()`），让分辨率档位按新的上限重新回退；
+- 录像期间不改，等 `onSegmentSaved()` 停录收尾后补上。
+
+### 参数必须全链路一致
+
+预录缓存与正式录制是两套编码器，交接时后者的编码器会被前者接管，所以下列参数
+任一项不一致就**不允许交接**，改为先释放预录再正常启动：
+
+尺寸、帧率、码率、声音开关、**视频编码格式**、**音频采样率与声道**。
+
+判断收敛在 `PreRecordBuffer.matches()` 一处。之前是各调用点手写字段比对，
+新加编码格式时就漏了一处——现在加字段只需要改这个方法。
+
+### HEVC 封装上的坑（已修复）
+
+`record/Fmp4Segment.kt` 的 `buildCsd()` 必须**按编码格式分叉**，两种格式对
+`initializationData` 的期望完全不同：
+
+| 编码 | media3 的要求 | 做法 |
+| --- | --- | --- |
+| H.264 / `avcC` | `size >= 2`，SPS 与 PPS 各占一个元素 | 按起始码把 csd-0 拆成多段 |
+| H.265 / `hvcC` | 只读 `[0]`，并自己按起始码解析里面的 VPS→SPS→PPS | csd-0 必须是**完整一整串** |
+
+若 HEVC 也照 H.264 拆开，csd-0 就只剩单个 VPS，media3 的 `hvcCBox()` 解析 SPS 时
+直接 `IndexOutOfBoundsException`，表现为「录像启动失败」。另外 hvcC 要求首个 NAL
+是 VPS（`0x40`），Android 编码器上报的 csd-0 满足这个顺序。
+
+**注意**：media3 1.11.1 把 HEVC 的 sample entry 四字符码硬编码成 `hvc1`。
+`hvc1` 严格来说要求参数集只出现在 `hvcC` 里，而 Android 编码器输出的关键帧可能
+带 in-band 的 VPS/SPS/PPS，此时应标 `hev1`。绝大多数播放器与系统相册都容忍这种情况
+（Android 平台自身也这么处理），但换 HEVC 后建议在目标机型上实测一遍：
+录制 → 系统相册播放 → App 内播放器回放。
+
+---
+
 ## 九、常改参数（`core/AppConfig.kt`）
 
 | 参数 | 说明 |
@@ -1291,6 +1368,9 @@ chunk* N 个块           每块 = IV(12B) || 密文(≤64KB) || Tag(16B)
 | `DEFAULT_AUDIO_SEGMENT_SECONDS` | 录音分段长度的默认值 `30 * 60`；实际值以设置页为准，调成 8 秒便于验证切片 |
 | `DEFAULT_VIDEO_FPS` / `DEFAULT_SEGMENT_MINUTES` | 录像帧率与分段时长的默认值；实际值以设置页为准 |
 | `videoSizeOptions()` / `VIDEO_SIZE_LABELS` | 录像分辨率四档（4K / 1080P / 720P / D1），存的是档位下标 |
+| `VIDEO_CODEC_AVC` / `VIDEO_CODEC_HEVC` / `VIDEO_CODEC_DEFAULT` | 视频编码档位与默认值（默认 H.264）；实际可选值按设备编码器能力过滤 |
+| `AUDIO_SAMPLE_RATE_OPTIONS` / `AUDIO_SAMPLE_RATE_DEFAULT` | 音频采样率档位（16k / 48k）与默认值（默认 16k） |
+| `AUDIO_CHANNELS_OPTIONS` / `AUDIO_CHANNELS_DEFAULT` | 声道档位（单 / 双）与默认值（默认单声道） |
 | `VIDEO_QUALITY_HIGH/MEDIUM/LOW` | 画质档对应的每像素每帧比特数（0.10 / 0.06 / 0.035） |
 | `AUDIO_SILENT_THRESHOLD` | 录音峰值低于此值提示「基本没录到声音」（默认 50 / 满量程 32767） |
 | `WATERMARK_MARGIN` | 水印四角的边距，占画面宽度的比例（0.02） |
@@ -1325,8 +1405,9 @@ chunk* N 个块           每块 = IV(12B) || 密文(≤64KB) || Tag(16B)
 3. **Android 14+**：若把 `targetSdk` 提到 34，前台服务必须声明
    `FOREGROUND_SERVICE_CAMERA` / `FOREGROUND_SERVICE_MICROPHONE` 权限，
    并且要在用户可见时启动。
-4. **音频**：单声道 48kHz / 128kbps；需要双声道改 `record/CodecSupport.kt` 里的
-   `CHANNELS` 与 `AudioFormat.CHANNEL_IN_MONO`（录像与录音共用的这一份）。
+4. **音频**：默认单声道 16kHz / 128kbps，可在设置页改成 48kHz 或双声道；
+   双声道需要设备有立体声麦克风，没有时该项不出现（探测见
+   `record/CodecSupport.kt` 的 `isAudioConfigSupported`）。
 5. **MP4 尾部索引**（已修复）：早先用传统 MP4，`moov` 要等 `stop()` 才写，
    进程被强杀当前这段会整体报废。现已改用 **fMP4（分片 MP4）**，moov/mvex
    前置、数据按 `moof+mdat` 分片自包含——强杀后已写入的分片仍可直接播放，

@@ -13,7 +13,6 @@ import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CameraMetadata
 import android.hardware.camera2.CaptureRequest
 import android.media.ImageReader
-import android.media.MediaCodecList
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -21,6 +20,8 @@ import android.util.Log
 import android.util.Size
 import android.view.Surface
 import com.dsh.bodycam.core.AppConfig
+import com.dsh.bodycam.core.SettingsStore
+import com.dsh.bodycam.record.videoEncoderMaxSize
 import com.dsh.bodycam.util.rotationToDegrees
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -615,12 +616,14 @@ class CameraController(
          */
         fun listCameras(context: Context): List<CameraSpec> {
             val manager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            // 编码器尺寸上限按当前设置的编码格式查：H.265 的上限通常比 H.264 小
+            val codecType = SettingsStore.videoCodec(context)
             return try {
                 val ids = manager.cameraIdList
                 val backs = mutableListOf<CameraSpec>()
                 val fronts = mutableListOf<CameraSpec>()
                 for (id in ids) {
-                    val spec = buildSpec(manager, id) ?: continue
+                    val spec = buildSpec(manager, id, codecType) ?: continue
                     if (spec.isFront) fronts += spec else backs += spec
                 }
                 val labeled = mutableListOf<CameraSpec>()
@@ -636,13 +639,13 @@ class CameraController(
             }
         }
 
-        private fun buildSpec(manager: CameraManager, id: String): CameraSpec? {
+        private fun buildSpec(manager: CameraManager, id: String, codecType: Int): CameraSpec? {
             return try {
                 val characteristics = manager.getCameraCharacteristics(id)
                 val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
                     ?: return null
                 val videoSizes = map.getOutputSizes(SurfaceTexture::class.java) ?: return null
-                val enc = encoderMaxSize()
+                val enc = videoEncoderMaxSize(codecType)
                 val videoSize = chooseVideoSize(videoSizes, enc)
                 val jpegSizes = map.getOutputSizes(ImageFormat.JPEG) ?: emptyArray()
                 val photoSize = choosePhotoSize(jpegSizes, videoSize)
@@ -696,34 +699,7 @@ class CameraController(
         }
 
         /**
-         * 查 H.264 硬件编码器支持的最大宽×高；查不到返回 null（按不限制处理）。
-         *
-         * 取所有 AVC 编码器能力的上限：设备上常有多个实现（硬编 + 软编），
-         * 只要有一个编得动，`MediaCodec.createEncoderByType` 就有机会选中它。
-         * 编码器能力跟摄像头无关，缓存一次即可（枚举 camera 时会按每颗调进来）。
-         */
-        private val encoderMaxSizeCache: Size? by lazy {
-            try {
-                var bestW = 0
-                var bestH = 0
-                for (info in MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos) {
-                    if (!info.isEncoder) continue
-                    if (info.supportedTypes.none { it.equals("video/avc", ignoreCase = true) }) continue
-                    val caps = runCatching { info.getCapabilitiesForType("video/avc") }.getOrNull()
-                        ?: continue
-                    val vc = runCatching { caps.videoCapabilities }.getOrNull() ?: continue
-                    bestW = maxOf(bestW, vc.supportedWidths.upper)
-                    bestH = maxOf(bestH, vc.supportedHeights.upper)
-                }
-                if (bestW > 0 && bestH > 0) Size(bestW, bestH) else null
-            } catch (e: Exception) {
-                null
-            }
-        }
-
-        private fun encoderMaxSize(): Size? = encoderMaxSizeCache
-
-        /** 拍照尺寸尽量跟视频同比例，避免预览/照片畸变 */
+         * 拍照尺寸尽量跟视频同比例，避免预览/照片畸变 */
         private fun choosePhotoSize(sizes: Array<Size>, video: Size): Size {
             if (sizes.isEmpty()) return video
             val sameRatio = sizes.filter { it.width * video.height == it.height * video.width }

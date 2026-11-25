@@ -3,12 +3,12 @@ package com.dsh.bodycam.record
 import android.content.Context
 import android.media.AudioRecord
 import android.media.MediaCodec
-import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Bundle
 import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
+import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.core.TriggerRouter
 import com.dsh.bodycam.util.Storage
 import java.text.SimpleDateFormat
@@ -53,6 +53,9 @@ class SegmentRecorder(private val context: Context) {
     companion object {
         private const val TAG = "SegmentRecorder"
         private const val STOP_TIMEOUT_MS = 4_000L
+
+        /** join 在 STOP_TIMEOUT_MS 之外多等的余量，确保线程先于编码器释放退出 */
+        private const val JOIN_GRACE_MS = 1_000L
 
         /** muxer 就绪前最多缓存多少实时视频帧（约 2 秒 @30fps） */
         private const val MAX_PENDING_REALTIME_FRAMES = 60
@@ -133,6 +136,12 @@ class SegmentRecorder(private val context: Context) {
      */
     private var encryptPassphraseThisRun: String? = null
 
+    /** 本次录制的音频参数（采样率/声道）；[start] 时定下，中途改设置不影响本段 */
+    private var audioConfigThisRun: AudioConfig = AudioConfig.DEFAULT
+
+    /** 本次录制的视频编码档位（[AppConfig.VIDEO_CODEC_AVC] / HEVC） */
+    private var videoCodecTypeThisRun: Int = AppConfig.VIDEO_CODEC_DEFAULT
+
     private var sessionStartUs = 0L
     private var basePtsUs = -1L
 
@@ -194,7 +203,9 @@ class SegmentRecorder(private val context: Context) {
         segmentSeconds: Int,
         preHandover: PreRecordBuffer.Handover? = null,
         audioEnabled: Boolean = true,
-        encryptPassphrase: String? = null
+        encryptPassphrase: String? = null,
+        codecType: Int = AppConfig.VIDEO_CODEC_DEFAULT,
+        audioConfig: AudioConfig = AudioConfig.DEFAULT
     ): Surface? {
         synchronized(lock) {
             if (started) return null
@@ -211,6 +222,8 @@ class SegmentRecorder(private val context: Context) {
             audioFormat = null
             audioEnabledThisRun = audioEnabled
             encryptPassphraseThisRun = encryptPassphrase
+            audioConfigThisRun = audioConfig
+            videoCodecTypeThisRun = codecType
             segmentDurationUs = segmentSeconds.coerceAtLeast(1) * US_PER_SECOND
             orientationHint = orientation
             // 必须用 CLOCK_BOOTTIME：相机帧时间戳（SENSOR_TIMESTAMP）就是这个时基。
@@ -323,8 +336,12 @@ class SegmentRecorder(private val context: Context) {
             Log.w(TAG, "signalEndOfInputStream", e)
         }
 
-        videoThread?.join(STOP_TIMEOUT_MS)
-        audioThread?.join(STOP_TIMEOUT_MS)
+        // 线程内部的退出截止同样是 STOP_TIMEOUT_MS：如果 join 也用这个值，
+        // 两个计时器几乎同时到点，join 返回时线程往往还在 dequeue/getOutputBuffer
+        // 的最后一轮里，紧接着 releaseInternal() 释放编码器就会撞上
+        // IllegalStateException。所以 join 必须多留一段余量，超时再补一次中断。
+        joinQuietly(videoThread)
+        joinQuietly(audioThread)
         videoThread = null
         audioThread = null
 
@@ -358,26 +375,13 @@ class SegmentRecorder(private val context: Context) {
     // ---------------------------------------------------------------- 编码器
 
     private fun startVideoCodec(width: Int, height: Int, fps: Int, bitrate: Int): Surface {
-        val format = MediaFormat.createVideoFormat(VIDEO_MIME, width, height).apply {
-            setInteger(
-                MediaFormat.KEY_COLOR_FORMAT,
-                MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface
-            )
-            setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
-            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            // 1 秒一个 I 帧：分段切换时最多等 1 秒就能拿到关键帧
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-        }
-        val codec = MediaCodec.createEncoderByType(VIDEO_MIME)
-        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        val surface = codec.createInputSurface()
-        codec.start()
+        val (codec, surface) = openVideoEncoder(videoCodecTypeThisRun, width, height, fps, bitrate)
         videoCodec = codec
         return surface
     }
 
     private fun startAudioCodec() {
-        val (codec, record) = openAudioCapture(context)
+        val (codec, record) = openAudioCapture(context, audioConfigThisRun)
         audioCodec = codec
         audioRecord = record
     }
@@ -421,13 +425,28 @@ class SegmentRecorder(private val context: Context) {
                 // 预录交接场景：sessionStartUs 已回退到交接首帧，实时帧的
                 // ptsUs 必然 ≥ 0 且衔接在交接帧之后（同一编码器同一时基）
                 if (ptsUs >= 0) {
-                    val buffer = codec.getOutputBuffer(index)
+                    // getOutputBuffer 在编码器已被 stop()/release() 后调用会抛
+                    // IllegalStateException。stop() 里 join 有超时，超时后主线程
+                    // 仍会释放编码器，而本线程可能刚 dequeue 到索引还没取缓冲——
+                    // 这个窗口必然存在，所以取缓冲必须自己兜住异常直接退出循环，
+                    // 不能让它冒到线程顶层变成 FATAL。
+                    val buffer = try {
+                        codec.getOutputBuffer(index)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "video getOutputBuffer, codec released", e)
+                        break
+                    }
                     if (buffer != null) {
                         synchronized(lock) { onVideoFrameLocked(buffer, info, ptsUs, isKey) }
                     }
                 }
             }
-            codec.releaseOutputBuffer(index, false)
+            try {
+                codec.releaseOutputBuffer(index, false)
+            } catch (e: Exception) {
+                Log.w(TAG, "video releaseOutputBuffer, codec released", e)
+                break
+            }
             if (eos) break
         }
     }
@@ -583,9 +602,10 @@ class SegmentRecorder(private val context: Context) {
                     }
                     // 送进编码器的 PTS 始终用绝对时基，和视频（相机时间戳）
                     // 同源；输出端再统一减 sessionStartUs 换成成片时间轴。
-                    val ptsUs = audioStartUs + frames * US_PER_SECOND / SAMPLE_RATE
-                    frames += read.toLong() / PCM_BYTES_PER_FRAME
-                    feedAudio(codec, pcm, read, ptsUs)
+                    val cfg = audioConfigThisRun
+                    val ptsUs = audioStartUs + frames * US_PER_SECOND / cfg.sampleRate
+                    frames += read.toLong() / cfg.pcmBytesPerFrame
+                    feedAudio(codec, pcm, read, ptsUs, cfg)
                     lastPtsUs = ptsUs
                     logMicLevel(pcm, read)
                 }
@@ -611,10 +631,20 @@ class SegmentRecorder(private val context: Context) {
                 if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) eos = true
                 val isConfig = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
                 if (!isConfig && info.size > 0) {
-                    val buffer = codec.getOutputBuffer(index)
+                    val buffer = try {
+                        codec.getOutputBuffer(index)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "audio getOutputBuffer, codec released", e)
+                        break
+                    }
                     if (buffer != null) synchronized(lock) { onAudioFrameLocked(buffer, info) }
                 }
-                codec.releaseOutputBuffer(index, false)
+                try {
+                    codec.releaseOutputBuffer(index, false)
+                } catch (e: Exception) {
+                    Log.w(TAG, "audio releaseOutputBuffer, codec released", e)
+                    break
+                }
             }
 
             if (eos) break
@@ -775,6 +805,27 @@ class SegmentRecorder(private val context: Context) {
     }
 
     // ---------------------------------------------------------------- 清理
+
+    /**
+     * 等线程退出，超时后中断并再等一次。
+     *
+     * 线程自身有 STOP_TIMEOUT_MS 的退出截止，这里额外留出 JOIN_GRACE_MS，
+     * 避免 join 返回时线程还活着，紧接着 releaseInternal() 把编码器释放掉。
+     */
+    private fun joinQuietly(thread: Thread?) {
+        thread ?: return
+        try {
+            thread.join(STOP_TIMEOUT_MS + JOIN_GRACE_MS)
+            if (thread.isAlive) {
+                Log.w(TAG, "thread ${thread.name} still alive, interrupting")
+                thread.interrupt()
+                thread.join(JOIN_GRACE_MS)
+            }
+            if (thread.isAlive) Log.w(TAG, "thread ${thread.name} did not exit")
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+    }
 
     private fun releaseInternal() {
         runCatching { videoCodec?.stop() }

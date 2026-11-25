@@ -677,8 +677,9 @@ internal object MuxerFix {
 
         var trafIndex = 0
         var pos = 8 // 跳过 moof 头
-        // 本 moof 内已经插入的字节数；绝对偏移要按这个逐个累加
-        var localShift = 0L
+        // 本 moof 总共插入的字节数：mdat 整体后移这么多，
+        // 每个 traf 的 data_offset 都要加同一个值（不是逐个累加）
+        val moofInsertBytes = pending.size * TFDT_BOX_SIZE
         val trafBlocks = ArrayList<ByteArray>()
 
         while (pos + 8 <= moof.size) {
@@ -688,8 +689,17 @@ internal object MuxerFix {
             if (type == "traf") {
                 trafIndex++
                 val ticks = pending[trafIndex]
-                val block = rebuildTraf(moof, pos, pos + size.toInt(), ticks, shift + localShift)
-                if (ticks != null) localShift += TFDT_BOX_SIZE
+                // base_data_offset 是绝对偏移：只加本 moof 之前的累计插入量，
+                // 同一 moof 内所有 traf 的 base 都指向 moof 起点，值相同。
+                //
+                // data_offset 是相对 moof 起点的偏移（base 指向 moof 起点时），
+                // moof 整体变长多少，mdat 数据就后移多少，所以每个 traf 都加
+                // 本 moof 的总插入量。
+                val block = rebuildTraf(
+                    moof, pos, pos + size.toInt(), ticks,
+                    offsetShift = shift,
+                    dataShift = moofInsertBytes.toLong()
+                )
                 trafBlocks.add(block)
             } else {
                 trafBlocks.add(moof.copyOfRange(pos, pos + size.toInt()))
@@ -707,14 +717,36 @@ internal object MuxerFix {
     }
 
     /**
-     * 重建单个 traf：tfhd 之后插入 tfdt，修正 base_data_offset，重算 traf size。
+     * 重建一个 traf，可选在 `tfhd` 后插入 tfdt，并按偏移修正数据定位。
+     *
+     * ## 两类偏移都要改，缺一不可
+     *
+     * 插入 tfdt 后 moof 变长，`mdat` 整体后移。样本数据的定位是
+     * `数据位置 = base_data_offset + data_offset`，两个字段含义不同：
+     *
+     * - `tfhd.base_data_offset`（flags & 0x1）：**相对文件开头**的绝对偏移，
+     *   指向 moof 起点。要加的是本 moof **之前**所有已插入字节的累计量
+     *   [offsetShift]。同一 moof 内所有 traf 的这个值相同。
+     * - `trun.data_offset`（flags & 0x1）：**相对 base_data_offset** 的偏移。
+     *   base 指向 moof 起点时它等于「mdat 数据起点 − moof 起点」。moof 整体
+     *   变长多少，mdat 就后移多少，所以要加的是本 moof 的**总**插入量
+     *   [dataShift]——不是按 traf 逐个累加。
+     *
+     * 只改 base 不改 data_offset，解析器仍按旧偏移去读，实际落在 moof 内部或
+     * mdat 头几字节上，样本数据整段错位。ExoPlayer 靠自身 extractor 的容错
+     * 仍能播（甚至看起来正常），VLC / ffmpeg 这类严格实现直接判文件损坏。
+     *
+     * @param startTicks 非空则插入 tfdt（该 traf 分片的起始解码时间）
+     * @param offsetShift 本 moof 之前已插入的字节总数
+     * @param dataShift 修正 `trun.data_offset` 用的量（本 moof 的总插入量）
      */
     private fun rebuildTraf(
         moof: ByteArray,
         trafStart: Int,
         trafEnd: Int,
         startTicks: Long?,
-        offsetShift: Long
+        offsetShift: Long,
+        dataShift: Long
     ): ByteArray {
         val out = java.io.ByteArrayOutputStream(trafEnd - trafStart + TFDT_BOX_SIZE)
         val data = java.io.DataOutputStream(out)
@@ -735,6 +767,17 @@ internal object MuxerFix {
                     val at = 16 // size+type+version/flags+trackId
                     val oldOffset = readU64(box, at)
                     writeU64(box, at, oldOffset + offsetShift)
+                }
+                data.write(box)
+                bodySize += box.size
+            } else if (type == "trun" && dataShift > 0) {
+                // data_offset 是相对 base_data_offset 的偏移，moof 变长后同样要加
+                val box = moof.copyOfRange(pos, boxEnd)
+                val flags = u32(box, 8) and 0xFFFFFF
+                if (flags and 0x1 != 0) {
+                    // size+type+version/flags+sampleCount
+                    val at = 16
+                    writeU32(box, at, readU32(box, at) + dataShift.toInt())
                 }
                 data.write(box)
                 bodySize += box.size
@@ -1131,6 +1174,16 @@ internal object MuxerFix {
 
     private fun writeU64(buf: ByteArray, at: Int, value: Long) {
         for (i in 0 until 8) buf[at + i] = (value ushr (56 - i * 8)).toByte()
+    }
+
+    /** 读 buf 里的 32 位无符号值（trun.data_offset 是 signed，但偏移量恒为正） */
+    private fun readU32(buf: ByteArray, at: Int): Int = u32(buf, at)
+
+    private fun writeU32(buf: ByteArray, at: Int, value: Int) {
+        buf[at] = (value ushr 24).toByte()
+        buf[at + 1] = (value ushr 16).toByte()
+        buf[at + 2] = (value ushr 8).toByte()
+        buf[at + 3] = value.toByte()
     }
 
     /**

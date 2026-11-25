@@ -264,15 +264,28 @@ internal fun MediaFormat.toAudioFormat(): Format =
 /**
  * 取 csd-0 / csd-1 作为 initializationData。
  *
- * 有些编码器把 SPS+PPS 打包在 csd-0 里（没有 csd-1），视频轨必须按起始码
- * 拆成两个元素，否则 avcC 盒会因 initializationData.size < 2 抛异常；
+ * 两种编码格式对 csd 的期望完全不同，不能套同一套规则：
+ *
+ * - **H.264 / avcC**：要求 `initializationData.size >= 2`，SPS 与 PPS 各占一个
+ *   元素。有些编码器把 SPS+PPS 打包在 csd-0 里（没有 csd-1），必须按起始码
+ *   拆成两个，否则 avcC 盒会因元素不足抛异常。
+ * - **H.265 / hvcC**：只读 `initializationData[0]`，并**自己**按起始码把里面的
+ *   VPS→SPS→PPS 拆出来解析。这里若照 H.264 的做法拆成多个元素，csd-0 就只剩
+ *   单个 VPS，media3 解析 SPS 时直接 `IndexOutOfBoundsException`，表现为
+ *   「录像启动失败」。所以 HEVC 必须保持 csd-0 为完整的一整串；万一编码器把
+ *   VPS 放 csd-0、SPS+PPS 放 csd-1，把两段拼起来（都是 Annex-B，拼接合法）。
+ *
  * 音频轨的 esds 盒只需要 csd-0，原样返回。
  */
 private fun buildCsd(fmt: MediaFormat): List<ByteArray>? {
     val csd0 = fmt.getByteBuffer("csd-0")?.toBytes() ?: return null
     val csd1 = fmt.getByteBuffer("csd-1")?.toBytes()
+    val mime = fmt.getString(MediaFormat.KEY_MIME)
+    if (mime == MimeTypes.VIDEO_H265) {
+        return listOf(if (csd1 != null) csd0 + csd1 else csd0)
+    }
     if (csd1 != null) return listOf(csd0, csd1)
-    if (!MimeTypes.isVideo(fmt.getString(MediaFormat.KEY_MIME))) return listOf(csd0)
+    if (mime == null || !MimeTypes.isVideo(mime)) return listOf(csd0)
     return splitNalUnits(csd0).takeIf { it.size >= 2 } ?: listOf(csd0)
 }
 

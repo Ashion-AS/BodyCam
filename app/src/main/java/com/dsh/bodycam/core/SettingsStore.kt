@@ -3,6 +3,7 @@ package com.dsh.bodycam.core
 import android.content.Context
 import android.view.KeyEvent
 import com.dsh.bodycam.core.AppConfig
+import com.dsh.bodycam.record.isVideoCodecSupported
 import com.dsh.bodycam.util.VideoCrypto
 import com.dsh.bodycam.watermark.WatermarkCorner
 import com.dsh.bodycam.watermark.WatermarkField
@@ -47,6 +48,9 @@ object SettingsStore {
     private const val KEY_VIDEO_SIZE_INDEX = "video_size_index"
     private const val KEY_VIDEO_FPS = "video_fps"
     private const val KEY_VIDEO_QUALITY = "video_quality"
+    private const val KEY_VIDEO_CODEC = "video_codec"
+    private const val KEY_AUDIO_SAMPLE_RATE = "audio_sample_rate"
+    private const val KEY_AUDIO_CHANNELS = "audio_channels"
     private const val KEY_SEGMENT_MINUTES = "segment_minutes"
     private const val KEY_AUDIO_SEGMENT_MINUTES = "audio_segment_minutes"
     private const val KEY_VIDEO_AUDIO = "video_audio"
@@ -279,6 +283,48 @@ object SettingsStore {
 
     fun setVideoQuality(context: Context, quality: Int) {
         prefs(context).edit().putInt(KEY_VIDEO_QUALITY, quality).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /**
+     * 视频编码格式：见 [AppConfig.VIDEO_CODEC_AVC] / [AppConfig.VIDEO_CODEC_HEVC]。
+     *
+     * 存下的值可能来自换机前（那台机器有 H.265 编码器，这台没有），读的时候
+     * 用设备能力兜一层，避免拿着 HEVC 去 configure 一台编不了的机器。
+     */
+    fun videoCodec(context: Context): Int {
+        val v = prefs(context).getInt(KEY_VIDEO_CODEC, AppConfig.VIDEO_CODEC_DEFAULT)
+        return if (isVideoCodecSupported(v)) v else AppConfig.VIDEO_CODEC_AVC
+    }
+
+    fun setVideoCodec(context: Context, codec: Int) {
+        prefs(context).edit().putInt(KEY_VIDEO_CODEC, codec).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 音频采样率（Hz）：16k / 48k，非法值回退默认档 */
+    fun audioSampleRate(context: Context): Int {
+        val v = prefs(context).getInt(KEY_AUDIO_SAMPLE_RATE, AppConfig.AUDIO_SAMPLE_RATE_DEFAULT)
+        return if (v in AppConfig.AUDIO_SAMPLE_RATE_OPTIONS) v else AppConfig.AUDIO_SAMPLE_RATE_DEFAULT
+    }
+
+    fun setAudioSampleRate(context: Context, rate: Int) {
+        prefs(context).edit().putInt(KEY_AUDIO_SAMPLE_RATE, rate).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 音频声道数：1 单声道 / 2 双声道，非法值回退默认档 */
+    fun audioChannels(context: Context): Int {
+        val v = prefs(context).getInt(KEY_AUDIO_CHANNELS, AppConfig.AUDIO_CHANNELS_DEFAULT)
+        return if (v == AppConfig.AUDIO_CHANNELS_MONO || v == AppConfig.AUDIO_CHANNELS_STEREO) {
+            v
+        } else {
+            AppConfig.AUDIO_CHANNELS_DEFAULT
+        }
+    }
+
+    fun setAudioChannels(context: Context, channels: Int) {
+        prefs(context).edit().putInt(KEY_AUDIO_CHANNELS, channels).apply()
         listener?.onSettingsChanged()
     }
 

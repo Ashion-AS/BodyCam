@@ -11,6 +11,9 @@ import android.widget.Switch
 import android.widget.TextView
 import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.core.SettingsStore
+import com.dsh.bodycam.record.supportedAudioChannels
+import com.dsh.bodycam.record.supportedAudioSampleRates
+import com.dsh.bodycam.record.supportedVideoCodecs
 import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.util.StoragePermission
 import com.dsh.bodycam.util.VideoCrypto
@@ -35,6 +38,11 @@ class SettingsActivity : Activity() {
     private lateinit var rgVideoSize: RadioGroup
     private lateinit var rgVideoFps: RadioGroup
     private lateinit var rgVideoQuality: RadioGroup
+    private lateinit var rgVideoCodec: RadioGroup
+    private lateinit var rgAudioSampleRate: RadioGroup
+    private lateinit var rgAudioChannels: RadioGroup
+    private lateinit var tvVideoCodecHint: TextView
+    private lateinit var tvAudioChannelsHint: TextView
     private lateinit var llSegmentMinutes: LinearLayout
     private lateinit var llAudioSegmentMinutes: LinearLayout
     private lateinit var llWmTopLeft: LinearLayout
@@ -77,6 +85,11 @@ class SettingsActivity : Activity() {
         rgVideoSize = findViewById(R.id.rgVideoSize)
         rgVideoFps = findViewById(R.id.rgVideoFps)
         rgVideoQuality = findViewById(R.id.rgVideoQuality)
+        rgVideoCodec = findViewById(R.id.rgVideoCodec)
+        rgAudioSampleRate = findViewById(R.id.rgAudioSampleRate)
+        rgAudioChannels = findViewById(R.id.rgAudioChannels)
+        tvVideoCodecHint = findViewById(R.id.tvVideoCodecHint)
+        tvAudioChannelsHint = findViewById(R.id.tvAudioChannelsHint)
         llSegmentMinutes = findViewById(R.id.llSegmentMinutes)
         llAudioSegmentMinutes = findViewById(R.id.llAudioSegmentMinutes)
         llWmTopLeft = findViewById(R.id.llWmTopLeft)
@@ -168,6 +181,15 @@ class SettingsActivity : Activity() {
         )
         storageRow.isClickable = !granted
     }
+
+    /**
+     * 设备能力相关的选项行：只有一个可选项就说明该能力本机不支持，
+     * 提示文字换成 [unsupportedRes]（讲清原因），否则用 [normalRes]。
+     *
+     * 编码格式、声道两行都是这个形态。
+     */
+    private fun hintResFor(count: Int, normalRes: Int, unsupportedRes: Int): Int =
+        if (count <= 1) unsupportedRes else normalRes
 
     /**
      * 分段控件：往 [group] 里塞一排可选项。
@@ -503,6 +525,44 @@ class SettingsActivity : Activity() {
         ) { quality ->
             SettingsStore.setVideoQuality(this, quality)
         }
+
+        // 编码格式按设备能力过滤：没有 H.265 编码器的机器上不出现该项，
+        // 避免选了根本编不了的档位（开录即失败）
+        val codecs = supportedVideoCodecs().map { type ->
+            type to AppConfig.VIDEO_CODEC_LABELS[type]
+        }
+        buildSegment(rgVideoCodec, codecs, SettingsStore.videoCodec(this)) { type ->
+            SettingsStore.setVideoCodec(this, type)
+        }
+        tvVideoCodecHint.setText(
+            hintResFor(
+                codecs.size,
+                R.string.settings_video_codec_summary,
+                R.string.settings_video_codec_unsupported
+            )
+        )
+
+        val rates = supportedAudioSampleRates().map { rate ->
+            rate to getString(R.string.settings_audio_sample_rate_fmt, rate / 1000)
+        }
+        buildSegment(rgAudioSampleRate, rates, SettingsStore.audioSampleRate(this)) { rate ->
+            SettingsStore.setAudioSampleRate(this, rate)
+        }
+
+        // 声道同理：没有立体声麦克风的机器只显示单声道
+        val channels = supportedAudioChannels().map { ch ->
+            ch to AppConfig.AUDIO_CHANNELS_LABELS[ch - 1]
+        }
+        buildSegment(rgAudioChannels, channels, SettingsStore.audioChannels(this)) { ch ->
+            SettingsStore.setAudioChannels(this, ch)
+        }
+        tvAudioChannelsHint.setText(
+            hintResFor(
+                channels.size,
+                R.string.settings_audio_channels_summary,
+                R.string.settings_audio_channels_unsupported
+            )
+        )
 
         val segments = AppConfig.SEGMENT_MINUTE_OPTIONS.map {
             getString(R.string.settings_segment_fmt, it)

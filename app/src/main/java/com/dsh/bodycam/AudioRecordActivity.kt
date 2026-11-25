@@ -17,6 +17,7 @@ import com.dsh.bodycam.core.AppConfig
 import com.dsh.bodycam.core.SettingsStore
 import com.dsh.bodycam.core.TriggerRouter
 import com.dsh.bodycam.record.AudioRecorder
+import com.dsh.bodycam.record.audioConfigFromSettings
 import com.dsh.bodycam.ui.ToastBar
 import com.dsh.bodycam.ui.WaveformView
 import com.dsh.bodycam.util.Storage
@@ -221,7 +222,11 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
             requestAudioPermissionIfNeeded()
             return
         }
-        if (!rec.start(SettingsStore.audioSegmentMinutes(this) * 60)) {
+        if (!rec.start(
+                SettingsStore.audioSegmentMinutes(this) * 60,
+                audioConfigFromSettings(this)
+            )
+        ) {
             // 带上具体原因：MTK 等 ROM 上「目录建不出来」和「麦克风打不开」
             // 表现一样（都是启动失败），不区分的话用户只能干猜。
             val msg = when (rec.lastCreateFailReason) {
