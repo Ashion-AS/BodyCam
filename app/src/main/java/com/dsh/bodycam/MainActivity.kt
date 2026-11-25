@@ -111,6 +111,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     private lateinit var btnTorch: android.widget.ImageView
     private lateinit var btnSwitchCamera: android.widget.ImageView
     private lateinit var zoomSlider: com.dsh.bodycam.ui.ZoomSliderView
+    private lateinit var topBar: View
+    private lateinit var dockBar: View
 
     /** 当前使用的摄像头能力；切换摄像头时整体替换 */
     private var currentSpec: CameraSpec? = null
@@ -306,6 +308,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
                     applyOrientation()
                     // 水印四角内容/分组名可能在设置页刚改过，立刻重画一帧
                     updateWatermark()
+                    // 纯视觉项（描边开关、缩放条长度）改了要立刻生效
+                    applyUiAppearance()
                 }
             }
         }
@@ -329,6 +333,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         if (AppConfig.KEEP_SCREEN_ON) {
             window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
+
+        // 描边开光与缩放条长度：布局里是「无描边 + 长」的默认值，这里按存储覆盖
+        applyUiAppearance()
 
         handleIntent(intent)
         ensurePermissions()
@@ -455,6 +462,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         btnTorch = findViewById(R.id.btnTorch)
         btnSwitchCamera = findViewById(R.id.btnSwitchCamera)
         zoomSlider = findViewById(R.id.zoomSlider)
+        topBar = findViewById(R.id.topBar)
+        dockBar = findViewById(R.id.dockBar)
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -1079,6 +1088,32 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             val (w, h) = AppConfig.photoSizeOptions()
                 .getOrElse(SettingsStore.photoSizeIndex(this)) { AppConfig.photoSizeOptions()[0] }
             cam.setPhotoSize(currentSpec?.resolvePhotoSize(w, h) ?: android.util.Size(w, h))
+        }
+    }
+
+    /**
+     * 纯视觉设置：顶栏/操作坞的描边开关、缩放条竖向长度。
+     * 都只换背景 drawable 或改 LayoutParams，不碰相机会话，录像中也能改。
+     */
+    private fun applyUiAppearance() {
+        topBar.setBackgroundResource(
+            if (SettingsStore.isTopBarRuleEnabled(this)) R.drawable.bg_top_bar_rule
+            else R.drawable.bg_top_bar
+        )
+        dockBar.setBackgroundResource(
+            if (SettingsStore.isDockRuleEnabled(this)) R.drawable.bg_dock_bar_rule
+            else R.drawable.bg_dock_bar
+        )
+        val heightRes = when (SettingsStore.zoomSliderLength(this)) {
+            0 -> R.dimen.zoom_slider_height_short
+            1 -> R.dimen.zoom_slider_height_medium
+            else -> R.dimen.zoom_slider_height_long
+        }
+        val targetHeight = resources.getDimensionPixelSize(heightRes)
+        val lp = zoomSlider.layoutParams
+        if (lp != null && lp.height != targetHeight) {
+            lp.height = targetHeight
+            zoomSlider.layoutParams = lp
         }
     }
 

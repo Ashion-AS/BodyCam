@@ -988,6 +988,125 @@
                     android:text="@string/settings_watermark_group_summary" />
             </LinearLayout>
 
+            <!-- ==================== UI 设置 ==================== -->
+
+            <TextView
+                style="@style/BodyCamSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingTop="@dimen/space_lg"
+                android:paddingBottom="@dimen/space_xs"
+                android:text="@string/settings_section_ui" />
+
+            <!-- 顶栏上下描边（默认关闭） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_top_bar_rule_title" />
+
+                    <TextView
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_2xs"
+                        android:text="@string/settings_top_bar_rule_summary" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swTopBarRule"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:minWidth="@dimen/touch_target"
+                    android:minHeight="@dimen/touch_target" />
+            </LinearLayout>
+
+            <!-- 操作坞外圈描边（默认关闭） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_dock_rule_title" />
+
+                    <TextView
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_2xs"
+                        android:text="@string/settings_dock_rule_summary" />
+                </LinearLayout>
+
+                <Switch
+                    android:id="@+id/swDockRule"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:minWidth="@dimen/touch_target"
+                    android:minHeight="@dimen/touch_target" />
+            </LinearLayout>
+
+            <!-- 缩放条竖向长度：短 / 中 / 长 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_zoom_slider_length_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgZoomSliderLength"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_zoom_slider_length_summary" />
+            </LinearLayout>
+
             <!-- ==================== 其他 ==================== -->
 
             <TextView

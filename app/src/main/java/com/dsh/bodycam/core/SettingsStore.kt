@@ -58,6 +58,9 @@ object SettingsStore {
     private const val KEY_WM_FIELD_BR = "wm_field_br"
     private const val KEY_WM_GROUP_NAME = "wm_group_name"
     private const val KEY_WM_USER_NAME = "wm_user_name"
+    private const val KEY_UI_TOP_BAR_RULE = "ui_top_bar_rule"
+    private const val KEY_UI_DOCK_RULE = "ui_dock_rule"
+    private const val KEY_UI_ZOOM_SLIDER_LENGTH = "ui_zoom_slider_length"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
@@ -69,6 +72,14 @@ object SettingsStore {
 
     /** 出厂默认关闭延录：按下停止即停，不追加录制 */
     const val DEFAULT_POST_RECORD_SECONDS = 0
+
+    /**
+     * 缩放条竖向长度档位：0 = 短、1 = 中、2 = 长。
+     * 「长」是历史实现；中/短在其基础上递减，短档单独放宽到可操作长度。
+     */
+    val ZOOM_SLIDER_LENGTH_OPTIONS = intArrayOf(0, 1, 2)
+
+    const val DEFAULT_ZOOM_SLIDER_LENGTH = 2
 
     interface Listener {
         fun onSettingsChanged()
@@ -479,4 +490,36 @@ object SettingsStore {
         WatermarkCorner.BOTTOM_LEFT to WatermarkField.DEVICE_STATUS,
         WatermarkCorner.BOTTOM_RIGHT to WatermarkField.GROUP_USER
     )
+
+    // ------------------------------------------------------------ UI 设置
+
+    /** 顶栏上下描边：默认关闭，保持 8d84dc1 之后的「与画面自然衔接」观感 */
+    fun isTopBarRuleEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_UI_TOP_BAR_RULE, false)
+
+    fun setTopBarRuleEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_UI_TOP_BAR_RULE, enabled).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /** 底部操作坞外圈描边：默认关闭 */
+    fun isDockRuleEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_UI_DOCK_RULE, false)
+
+    fun setDockRuleEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_UI_DOCK_RULE, enabled).apply()
+        listener?.onSettingsChanged()
+    }
+
+    /**
+     * 缩放条竖向长度档位：0 = 短、1 = 中、2 = 长。
+     * 默认「长」，即历史实现的实际长度，升级后观感不变。
+     */
+    fun zoomSliderLength(context: Context): Int =
+        prefs(context).getInt(KEY_UI_ZOOM_SLIDER_LENGTH, DEFAULT_ZOOM_SLIDER_LENGTH)
+
+    fun setZoomSliderLength(context: Context, level: Int) {
+        prefs(context).edit().putInt(KEY_UI_ZOOM_SLIDER_LENGTH, level).apply()
+        listener?.onSettingsChanged()
+    }
 }

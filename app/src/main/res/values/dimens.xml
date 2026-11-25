@@ -48,8 +48,14 @@
     <!-- 录音页读数行：按 18sp 计时的行高兜底，就绪与计时切换时不跳 -->
     <dimen name="audio_readout_min_height">24dp</dimen>
 
-    <!-- 竖向缩放条：宽度只放把手与读数，高度约占屏幕一半，拇指从边沿滑进来就够 -->
+    <!-- 竖向缩放条：宽度只放把手与读数；高度分三档，见 SettingsStore.zoomSliderLength。
+       「长」是历史值。中/短不再按严格 1/3 递减：控件上下要留约 56dp 固定留白
+       （倍率读数的行高 + 把手半径），短档如果只给 93dp（长的 1/3），真正能滑的
+       轨道只剩 37dp，手指几乎没法用。短档定在 140dp，轨道约 84dp，
+       既明显比中档短，又留够操作空间。 -->
     <dimen name="zoom_slider_width">44dp</dimen>
-    <dimen name="zoom_slider_height">280dp</dimen>
+    <dimen name="zoom_slider_height_long">280dp</dimen>
+    <dimen name="zoom_slider_height_medium">187dp</dimen>
+    <dimen name="zoom_slider_height_short">140dp</dimen>
 
 </resources>

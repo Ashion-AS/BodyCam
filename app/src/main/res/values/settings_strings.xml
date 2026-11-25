@@ -37,6 +37,17 @@
     <string name="settings_debug_overlay_title">调试校准行</string>
     <string name="settings_debug_overlay_summary">主页预览左上角显示 S/D/R 角度与流尺寸，点一下循环校准方向。仅现场排障用，正式使用建议关闭</string>
 
+    <string name="settings_section_ui">UI 设置</string>
+    <string name="settings_top_bar_rule_title">顶栏描边</string>
+    <string name="settings_top_bar_rule_summary">在顶部信息栏的上下各加一条 1dp 细线，与取景画面之间界限更清楚。关闭时顶栏与画面自然衔接</string>
+    <string name="settings_dock_rule_title">操作坞描边</string>
+    <string name="settings_dock_rule_summary">在底部操作坞外圈加一条 1dp 细线。深底压在画面上时这圈线可能显脏，默认关闭</string>
+    <string name="settings_zoom_slider_length_title">缩放条长度</string>
+    <string name="settings_zoom_slider_length_summary">右侧竖向变焦条的竖向长度。短/中/长依次加长，长的长度与旧版本一致</string>
+    <string name="settings_zoom_slider_length_short">短</string>
+    <string name="settings_zoom_slider_length_medium">中</string>
+    <string name="settings_zoom_slider_length_long">长</string>
+
     <string name="settings_photo_flash_title">拍照补光</string>
     <string name="settings_photo_flash_summary">只影响拍照；录像过程中需要补光时，用主界面顶栏的闪电按钮开常亮</string>
     <string name="settings_photo_flash_off">关闭</string>

@@ -26,6 +26,9 @@ class SettingsActivity : Activity() {
     private lateinit var swPreRecord: Switch
     private lateinit var swLoopRecord: Switch
     private lateinit var swDebugOverlay: Switch
+    private lateinit var swTopBarRule: Switch
+    private lateinit var swDockRule: Switch
+    private lateinit var rgZoomSliderLength: RadioGroup
     private lateinit var rgDiskWarn: RadioGroup
     private lateinit var rgBatteryWarn: RadioGroup
     private lateinit var rgVideoSize: RadioGroup
@@ -64,6 +67,9 @@ class SettingsActivity : Activity() {
         swPreRecord = findViewById(R.id.swPreRecord)
         swLoopRecord = findViewById(R.id.swLoopRecord)
         swDebugOverlay = findViewById(R.id.swDebugOverlay)
+        swTopBarRule = findViewById(R.id.swTopBarRule)
+        swDockRule = findViewById(R.id.swDockRule)
+        rgZoomSliderLength = findViewById(R.id.rgZoomSliderLength)
         rgDiskWarn = findViewById(R.id.rgDiskWarn)
         rgBatteryWarn = findViewById(R.id.rgBatteryWarn)
         rgVideoSize = findViewById(R.id.rgVideoSize)
@@ -116,6 +122,16 @@ class SettingsActivity : Activity() {
             SettingsStore.setLoopRecordEnabled(this, checked)
         }
 
+        swTopBarRule.isChecked = SettingsStore.isTopBarRuleEnabled(this)
+        swTopBarRule.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setTopBarRuleEnabled(this, checked)
+        }
+
+        swDockRule.isChecked = SettingsStore.isDockRuleEnabled(this)
+        swDockRule.setOnCheckedChangeListener { _, checked ->
+            SettingsStore.setDockRuleEnabled(this, checked)
+        }
+
         buildDurationOptions()
         buildPostRecordOptions()
         buildPhotoFlashOptions()
@@ -128,6 +144,7 @@ class SettingsActivity : Activity() {
         buildVideoOptions()
         buildAudioOptions()
         buildWatermarkOptions()
+        buildZoomSliderLengthOptions()
         updateSections()
     }
 
@@ -223,6 +240,21 @@ class SettingsActivity : Activity() {
             rgPostRecord, options, SettingsStore.postRecordSeconds(this)
         ) { seconds ->
             SettingsStore.setPostRecordSeconds(this, seconds)
+        }
+    }
+
+    /** 缩放条竖向长度：短 / 中 / 长三档，长是历史值 */
+    private fun buildZoomSliderLengthOptions() {
+        val labels = mapOf(
+            0 to getString(R.string.settings_zoom_slider_length_short),
+            1 to getString(R.string.settings_zoom_slider_length_medium),
+            2 to getString(R.string.settings_zoom_slider_length_long)
+        )
+        val options = SettingsStore.ZOOM_SLIDER_LENGTH_OPTIONS.map { it to labels.getValue(it) }
+        buildSegment(
+            rgZoomSliderLength, options, SettingsStore.zoomSliderLength(this)
+        ) { level ->
+            SettingsStore.setZoomSliderLength(this, level)
         }
     }
 

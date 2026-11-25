@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  底部操作坞（开启外圈描边）：圆角深底 + 一圈 1dp 细线。
+  与 8d84dc1 之前的版本一致，底色沿用更透的 scrim_dock。
+  由 SettingsStore.isDockRuleEnabled 控制切换。
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/scrim_dock" />
+    <stroke
+        android:width="@dimen/rule_hair"
+        android:color="@color/rule_2" />
+    <corners android:radius="@dimen/radius_panel" />
+</shape>

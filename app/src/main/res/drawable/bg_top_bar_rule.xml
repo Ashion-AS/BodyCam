@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  顶栏（开启上下描边）：上下各一条 1dp 分隔线，不加投影、不做玻璃。
+  与 8d84dc1 之前的版本一致，只是原版只画了底边，这里按设置项补上顶边。
+  由 SettingsStore.isTopBarRuleEnabled 控制切换。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/scrim_bar" />
+        </shape>
+    </item>
+    <item
+        android:gravity="top"
+        android:height="@dimen/rule_hair">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/rule" />
+        </shape>
+    </item>
+    <item
+        android:gravity="bottom"
+        android:height="@dimen/rule_hair">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/rule" />
+        </shape>
+    </item>
+</layer-list>

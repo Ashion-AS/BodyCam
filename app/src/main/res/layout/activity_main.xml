@@ -39,6 +39,7 @@
 
         <!-- 顶栏：与画面之间只用一条 1dp 分隔线，不投影、不做玻璃 -->
         <FrameLayout
+            android:id="@+id/topBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@drawable/bg_top_bar"
@@ -223,7 +224,7 @@
     <com.dsh.bodycam.ui.ZoomSliderView
         android:id="@+id/zoomSlider"
         android:layout_width="@dimen/zoom_slider_width"
-        android:layout_height="@dimen/zoom_slider_height"
+        android:layout_height="@dimen/zoom_slider_height_long"
         android:layout_gravity="end|center_vertical"
         android:layout_marginEnd="@dimen/space_xs"
         android:visibility="gone" />
