@@ -1,6 +1,7 @@
 package com.dsh.bodycam.watermark
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
@@ -25,6 +26,9 @@ class Telemetry(private val context: Context) {
      * 幂等启动：重复调用不会重复注册监听。
      * 权限还没授予时先给占位文本，之后（权限弹窗同意 / 从系统设置返回）再调一次即可生效。
      */
+    // 权限守卫在 canLocate() 里，lint 的流分析跟不进辅助方法；两处 request 调用
+    // 本身也各自包了 try/catch，权限在这一刻被撤销也只会静默跳过
+    @SuppressLint("MissingPermission")
     fun start() {
         if (listener != null) return
         if (!canLocate()) {
