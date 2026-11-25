@@ -13,12 +13,16 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 「开始 / 停止」二合一按钮；录音同样自动分段（5~30 分钟可调），编码器不停、只换封装文件。
 
 <p align="center">
-  <img src="docs/preview.png" width="300" alt="预览界面">
-  <img src="docs/settings.png" width="300" alt="设置页">
+  <img src="docs/preview.png" width="260" alt="预览界面">
+  <img src="docs/settings.png" width="260" alt="设置页（存储与编码）">
+  <img src="docs/settings_photo.png" width="260" alt="设置页（拍照与录音）">
 </p>
 
 > 左：实时预览（水印四角烧在成片里，可用下方按钮或配置的外接触发操作）；
-> 右：设置页，预录、循环录像、拍照、水印与补光等开关都在这里。
+> 中/右：设置页的上下两段——**存储与编码**在最前，**拍照尺寸、录音分段、水印四角**在后。
+> 所有多档设置都是下拉框，当前值统一用琥珀色标出。
+>
+> 试装包：[docs/BodyCam-debug-v1.0-20261126.apk](docs/BodyCam-debug-v1.0-20261126.apk)
 
 ---
 
