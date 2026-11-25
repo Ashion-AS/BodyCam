@@ -21,13 +21,17 @@ class Telemetry(private val context: Context) {
 
     private var listener: LocationListener? = null
 
+    /**
+     * 幂等启动：重复调用不会重复注册监听。
+     * 权限还没授予时先给占位文本，之后（权限弹窗同意 / 从系统设置返回）再调一次即可生效。
+     */
     fun start() {
-        if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
+        if (listener != null) return
+        if (!canLocate()) {
             gpsText = "无定位权限"
             return
         }
+        gpsText = "定位中…"
         val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
         val l = object : LocationListener {
             override fun onLocationChanged(location: Location) = update(location)
@@ -54,6 +58,13 @@ class Telemetry(private val context: Context) {
         } catch (_: SecurityException) {
         }
     }
+
+    /** 精确定位或粗略定位，任一授予即可（Android 12+ 用户可只给「大致位置」） */
+    private fun canLocate(): Boolean =
+        context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
 
     private fun update(location: Location) {
         val ns = if (location.latitude >= 0) "N" else "S"

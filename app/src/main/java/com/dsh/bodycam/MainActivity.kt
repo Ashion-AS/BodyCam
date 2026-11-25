@@ -350,6 +350,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         resumed = true
         // 从设置页 / 录音页返回时重新认领主监听
         TriggerRouter.claimMainListener(this)
+        // 用户可能刚在系统设置里补授了定位，这里补一次启动（幂等）
+        telemetry?.start()
 
         val p = pipeline
         if (p != null) {
@@ -468,8 +470,13 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         val needed = mutableListOf<String>()
         if (!granted(Manifest.permission.CAMERA)) needed += Manifest.permission.CAMERA
         if (!granted(Manifest.permission.RECORD_AUDIO)) needed += Manifest.permission.RECORD_AUDIO
-        if (!granted(Manifest.permission.ACCESS_FINE_LOCATION)) {
+        // 精确定位 + 大致定位一起申请：Android 12+ 才会正常弹出「精确/大致」选择，
+        // 且用户选「大致」时也算有定位能力，不必反复追问
+        if (!granted(Manifest.permission.ACCESS_FINE_LOCATION) &&
+            !granted(Manifest.permission.ACCESS_COARSE_LOCATION)
+        ) {
             needed += Manifest.permission.ACCESS_FINE_LOCATION
+            needed += Manifest.permission.ACCESS_COARSE_LOCATION
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             !granted(Manifest.permission.POST_NOTIFICATIONS)
@@ -518,6 +525,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode != REQ_PERMISSIONS) return
         if (hasCorePermission()) {
+            // 权限弹窗是首次启动必经路径：同意后要重新拉起定位，
+            // 否则 Telemetry 停留在启动时「无权限」的快照上，经纬度永远为空
+            telemetry?.start()
             setup()
             ensureStorageAccess()
         } else {

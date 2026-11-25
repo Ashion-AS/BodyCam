@@ -27,6 +27,8 @@ captures/
 *.keystore
 keystore.properties
 signing.properties
+# 例外：docs/ 下存放分发给测试的安装包，需要入库
+!docs/*.apk
 
 # ---- 日志与临时文件 ----
 *.log
