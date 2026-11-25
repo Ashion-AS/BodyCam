@@ -67,7 +67,8 @@ object SettingsStore {
     /** 延录时长可选项；0 = 关闭延录，按下停止即停 */
     val POST_RECORD_OPTIONS = intArrayOf(0, 5, 10, 15, 30)
 
-    const val DEFAULT_POST_RECORD_SECONDS = 10
+    /** 出厂默认关闭延录：按下停止即停，不追加录制 */
+    const val DEFAULT_POST_RECORD_SECONDS = 0
 
     interface Listener {
         fun onSettingsChanged()
