@@ -61,6 +61,7 @@ object SettingsStore {
     private const val KEY_UI_TOP_BAR_RULE = "ui_top_bar_rule"
     private const val KEY_UI_DOCK_RULE = "ui_dock_rule"
     private const val KEY_UI_ZOOM_SLIDER_LENGTH = "ui_zoom_slider_length"
+    private const val KEY_STORAGE_COMPAT = "storage_compat"
 
     /** 预录时长可选项 */
     val PRE_RECORD_OPTIONS = intArrayOf(5, 10, 20, 30)
@@ -520,6 +521,27 @@ object SettingsStore {
 
     fun setZoomSliderLength(context: Context, level: Int) {
         prefs(context).edit().putInt(KEY_UI_ZOOM_SLIDER_LENGTH, level).apply()
+        listener?.onSettingsChanged()
+    }
+
+    // ------------------------------------------------------------ 存储
+
+    /**
+     * 兼容存储：把文件写进 `getExternalFilesDir(null)/BodyCam/`，
+     * 即 `Android/data/com.dsh.bodycam/files/BodyCam/`。
+     *
+     * 目录结构、文件名规则、VID_/IMG_/AUD_ 前缀、按天分文件夹都与默认存储
+     * 完全一致，只是换个根目录。好处是不需要「所有文件访问」权限，部分
+     * ROM 的 FUSE 不给 app 写公共存储时也能用；代价是卸载应用会一并删掉，
+     * 且其它应用/文件管理器看不到。
+     *
+     * 默认关闭，即维持公共存储 `/sdcard/BodyCam/` 直写。
+     */
+    fun isCompatStorage(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_STORAGE_COMPAT, false)
+
+    fun setCompatStorage(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_STORAGE_COMPAT, enabled).apply()
         listener?.onSettingsChanged()
     }
 }

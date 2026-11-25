@@ -24,6 +24,12 @@
     <string name="settings_storage_open">去开启</string>
     <string name="settings_storage_done">已开启</string>
 
+    <string name="settings_storage_mode_title">存储位置</string>
+    <string name="settings_storage_mode_default">默认存储</string>
+    <string name="settings_storage_mode_compat">兼容存储</string>
+    <string name="settings_storage_mode_summary">默认存储写到公共目录，其它应用和文件管理器可见；兼容存储写到应用私有目录，无需存储权限、兼容性更好，但卸载应用会一并删除</string>
+    <string name="settings_storage_mode_switched">已切换存储位置，仅影响之后保存的文件</string>
+
     <string name="settings_loop_record_title">循环录像</string>
     <string name="settings_loop_record_summary">空间不足时自动删除最早的录像分段腾出空间；关闭则提示空间不足并停止录像。正在写入的分段始终保留</string>
     <string name="settings_disk_warn_title">空间告警阈值</string>

@@ -48,6 +48,7 @@ Kotlin + Camera2 + OpenGL ES（C++/NDK）+ MediaCodec 实现的安卓视频执�
 | 录音分段可配 | 录音设置分区可选 5 / 10 / 15 / 20 / 30 分钟，独立于录像分段时长 |
 | 录像加密 | 设置页开关 + 32 位密钥；收尾后整文件 AES-256-GCM 分块加密，回放时输入密钥解密（见「八点十三」） |
 | 文件管理（图片 / 视频 / 音频） | `FilesActivity`：三个 tab 分别列出 `BodyCam/{Image,Video,Audio}` 下的文件，最新在最上；点击进入 `ViewerActivity` 看图 / 播视频 / 播音频 |
+| 存储位置可选 | 设置页「其他 → 存储位置」：默认存储写公共 `/sdcard/BodyCam/`，兼容存储写应用私有 `Android/data/<pkg>/files/BodyCam/`（后者不需要存储权限，见第四章） |
 | 强杀/掉电后文件仍可播放 | 录像与录音都写 **fMP4**（media3 `FragmentedMp4Muxer`），最多丢最后一个分片（2 秒） |
 | 录音/视频在 App 内可正常播放 | `util/MuxerFix` 收尾时回填 moov 的 duration、修正音频同步样本位、注入 tfdt、追写 mfra 索引（见「八点八」「八点九」「八点九之二」「八点九之三」） |
 
@@ -126,7 +127,8 @@ app/src/main/
 │   ├── util/BatteryGuard.kt         # 电量两级阈值检查（告警 / 安全停录），充电中一律视为正常
 │   ├── util/VideoCrypto.kt          # 录像文件 AES-256-GCM 分块加解密（见「八点十之二点七」）
 │   ├── util/DeviceSerial.kt         # 读真实设备 SN（SystemProperties → getSerial → ANDROID_ID 逐级回退）
-│   └── util/Storage.kt              # 文件落盘 + 文件页的目录枚举（list）
+│   ├── util/StoragePermission.kt    # 存储权限判断与引导（兼容存储下直接放行）
+│   └── util/Storage.kt              # 文件落盘 + 文件页的目录枚举（list）；root() 决定公共/私有根目录
 └── res/                             # 布局（主界面/设置页/文件页/查看页）、主题、图标、无障碍配置
 ```
 
@@ -150,8 +152,9 @@ app/build/outputs/apk/debug/app-debug.apk
 `local.properties` 里的 `sdk.dir` 换成你自己的 SDK 路径；换 NDK 版本时同步改
 `app/build.gradle.kts` 的 `ndkVersion`。
 
-文件输出目录（与系统 DCIM 同级，统一放在 `BodyCam` 下，按类型再按天分文件夹，
-`yyyyMMdd` 为当天的年月日，目录不存在会自动创建）：
+文件输出目录（统一放在 `BodyCam` 下，按类型再按天分文件夹，`yyyyMMdd` 为当天的
+年月日，目录不存在会自动创建）。下面以默认存储（公共存储根）为例，根目录可切到
+应用私有目录，见下方「存储位置」：
 
 ```
 /sdcard/BodyCam/Video/yyyyMMdd/VID_yyyyMMdd_HHmmss_part00.mp4
@@ -164,13 +167,44 @@ app/build/outputs/apk/debug/app-debug.apk
 写完后用 `MediaScannerConnection.scanFile` 把文件索引进相册/音乐库，所以相册和「文件」
 应用里都能看到。
 
+**存储位置**：设置页「其他 → 存储位置」可切两档，目录结构、文件名规则、前缀、
+按天分文件夹**完全一致**，只换根目录（`Storage.root()`）：
+
+| 档位 | 根目录 | 完整示例 |
+| --- | --- | --- |
+| 默认存储（出厂） | `/sdcard` | `/sdcard/BodyCam/Video/20260101/VID_....mp4` |
+| 兼容存储 | `getExternalFilesDir(null)` | `/sdcard/Android/data/com.dsh.bodycam/files/BodyCam/Video/20260101/VID_....mp4` |
+
+两者的取舍：
+
+| | 默认存储 | 兼容存储 |
+| --- | --- | --- |
+| 存储权限 | 需要「所有文件访问」 | **不需要**，系统不设门槛 |
+| 其它应用 / 电脑可见 | 是，相册与文件管理器可直接看到 | 否，Android 11+ 一般看不到 `Android/data/` |
+| 卸载应用 | 文件保留 | **文件一并删除** |
+| 分区 | 同 `/sdcard`，同一分区、同一剩余空间 | 同左 |
+| 应用存储配额 | 不计入 | 计入，极端吃紧时可能先于分区写满 |
+
+兼容存储专为「ROM 的 FUSE 不给 app 写公共存储」的设备兜底（例如部分 MTK 的
+Android 13 机型，即使 `MANAGE_EXTERNAL_STORAGE` 显示已授予仍建不出目录）。
+在这种模式下 `StoragePermission.isGranted()` 直接放行，`needsRuntimePermission()`
+也不再申请运行时权限，所以相关提示与跳转都会自动跳过。
+
+切换只影响之后保存的文件：切换时正在录制的分段继续写原路径（已打开的 FD 不动），
+文件管理页只列出当前模式根目录下的文件。选择切换后若改回默认存储，之前落在兼容
+目录里的文件不会自动迁移。
+
+> **已知局限**：`DiskGuard` 的告警与强制停录按 `StatFs.availableBytes`（分区剩余）
+> 判断，看不到应用存储配额。兼容存储撞到配额上限时写入会失败并上报
+> `FailReason.NOT_WRITABLE`/`IO_ERROR`，但不会提前触发「空间不足」告警。
+
 **为什么不用 `MediaStore.insert` 而直接写文件**：Android 11+ 的 MediaProvider 只允许把
 媒体插入到固定白名单目录（Image→`DCIM`/`Pictures`，Video→`DCIM`/`Movies`，
 Audio→`Music`/`Ringtones`，Files→`Download`/`Documents`）。把音频写进 `DCIM/Audio` 或把
 三类都放进自定义顶层 `BodyCam` 都会被拒绝（`Primary directory ... not allowed`）。
 直接文件写入 + 扫描入库即可绕开白名单，物理目录完全由我们自己掌控。
 
-**存储权限**（README 顶部点名的「所有文件访问」）：
+**存储权限**（README 顶部点名的「所有文件访问」，仅默认存储需要；兼容存储不需要）：
 
 | Android 版本 | 需要的权限 |
 | --- | --- |
@@ -745,13 +779,15 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
 页面结构：顶栏（返回 + 标题）+ 三个等宽文字 tab + 一个列表。
 
 - **三个 tab** 分别对应 `Storage.Kind.IMAGE / VIDEO / AUDIO`，扫描
-  `BodyCam/Image`、`BodyCam/Video`、`BodyCam/Audio` 下的所有 `yyyyMMdd` 子目录；
+  `BodyCam/Image`、`BodyCam/Video`、`BodyCam/Audio` 下的所有 `yyyyMMdd` 子目录。
+  根目录随设置页的「存储位置」变化（见第四章），结构与命名不变；
   选中 tab 的文字转琥珀色（与设置页分段选项同一套信号）。
 - **排序**：按文件修改时间倒序，时间相同再按文件名倒序——文件名里的
   `yyyyMMdd_HHmmss_SSS` 精度到毫秒，同秒连拍也不会乱序，**最新的永远在最上面**。
 - **列表项**：`item_file.xml`，左文件名、右「体积 · 修改时间」，与设置页的行同构
   （`paper_2` 底 + 1dp 分隔线，不叠卡片）。
-- 列表为空时显示 `files_empty`；没有「所有文件访问」权限时显示 `files_need_permission`。
+- 列表为空时显示 `files_empty`；没有「所有文件访问」权限时显示 `files_need_permission`
+  （兼容存储模式下不需要该权限，因此不会出现这条提示）。
 
 **点击文件**进入 `ViewerActivity`（`EXTRA_PATH` + `EXTRA_KIND`）：
 
@@ -1027,7 +1063,9 @@ patchMfra()              → 按新偏移追写 mfra 随机访问索引（八点
 把编码器缓冲、最后一个分片和 moov 回填全部写完，不会写出截断文件。
 
 > 阈值按 `StatFs.availableBytes` 判断，是**整块共享存储**的剩余空间，不是本应用
-> 目录的占用——这样才符合「磁盘快满了」的真实语义。
+> 目录的占用——这样才符合「磁盘快满了」的真实语义。`StatFs` 的根跟随「存储位置」
+> 设置，但两种模式在同一分区，读到的数值一致；区别在于兼容存储还受应用存储配额
+> 约束，而这里的判断看不到配额（见第四章「已知局限」）。
 
 ---
 

@@ -6,23 +6,29 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.Settings
+import com.dsh.bodycam.core.SettingsStore
 
 /**
  * 存储权限判断与引导。
  *
- * 本工程要往公共存储 `/sdcard/BodyCam/...` 直接写文件（见 [Storage]），
+ * 本工程默认往公共存储 `/sdcard/BodyCam/...` 直接写文件（见 [Storage]），
  * 这需要「所有文件访问」权限才能在 Android 11+ 生效：
  *
  *   API 30+   MANAGE_EXTERNAL_STORAGE（系统设置里单独开关，不能弹窗授予）
  *   API 26-29 WRITE_EXTERNAL_STORAGE（运行时权限；Android 10 靠清单里的
  *             requestLegacyExternalStorage 恢复旧行为）
  *
+ * 切到「兼容存储」后改为写 `getExternalFilesDir(null)/BodyCam/`，那是应用
+ * 私有目录，**不需要任何存储权限**，此处的判断一律直接放行。
+ *
  * 统一从这里判断，避免各页面各写一套。
  */
 object StoragePermission {
 
-    /** 当前是否已具备写公共存储的权限 */
+    /** 当前是否已具备写入目标存储位置的能力 */
     fun isGranted(context: Context): Boolean {
+        // 兼容存储走应用私有目录，系统不设门槛
+        if (SettingsStore.isCompatStorage(context)) return true
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Environment.isExternalStorageManager()
         } else {
@@ -64,6 +70,10 @@ object StoragePermission {
         }
     }
 
-    /** 需要运行时申请 WRITE_EXTERNAL_STORAGE 的档位（API 26-29） */
-    fun needsRuntimePermission(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.R
+    /**
+     * 需要运行时申请 WRITE_EXTERNAL_STORAGE 的档位（API 26-29）。
+     * 兼容存储写应用私有目录，不需要运行时权限。
+     */
+    fun needsRuntimePermission(context: Context): Boolean =
+        !SettingsStore.isCompatStorage(context) && Build.VERSION.SDK_INT < Build.VERSION_CODES.R
 }

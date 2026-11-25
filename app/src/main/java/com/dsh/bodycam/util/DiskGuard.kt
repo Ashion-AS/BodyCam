@@ -2,7 +2,6 @@ package com.dsh.bodycam.util
 
 import android.content.Context
 import android.media.MediaScannerConnection
-import android.os.Environment
 import android.os.StatFs
 import android.util.Log
 import com.dsh.bodycam.core.AppConfig
@@ -62,13 +61,13 @@ object DiskGuard {
         return maxOf(byDiv, AppConfig.DISK_STOP_MIN_MB * MB)
     }
 
-    /** 录像根目录：`/sdcard/BodyCam/Video` */
-    @Suppress("DEPRECATION")
-    fun videoDir(): File = File(Environment.getExternalStorageDirectory(), "BodyCam/Video")
+    /** 录像根目录：默认 `<公共存储>/BodyCam/Video`，兼容模式在应用私有目录下 */
+    fun videoDir(context: Context): File = File(Storage.root(context), "BodyCam/Video")
 
     /** 当前可用字节数；拿不到时返回 [Long.MAX_VALUE]，宁可不停录 */
-    fun freeBytes(): Long = try {
-        val stat = StatFs(Environment.getExternalStorageDirectory().absolutePath)
+    private fun freeBytes(context: Context): Long = try {
+        // 按当前存储模式的根做 statFs：兼容存储位于同一分区，但要跟随设置
+        val stat = StatFs(Storage.root(context).absolutePath)
         stat.availableBytes
     } catch (e: Exception) {
         Log.w(TAG, "statFs failed", e)
@@ -77,7 +76,7 @@ object DiskGuard {
 
     /** 只读检查，不删任何东西 */
     fun inspect(context: Context): Status {
-        val free = freeBytes()
+        val free = freeBytes(context)
         val warn = warnBytes(context)
         val stop = stopBytes(context)
         return Status(levelOf(free, warn, stop), free, warn, stop)
@@ -97,7 +96,7 @@ object DiskGuard {
         loopRecord: Boolean,
         keepProvider: () -> String? = { null }
     ): Status {
-        val free = freeBytes()
+        val free = freeBytes(context)
         val warn = warnBytes(context)
         val stop = stopBytes(context)
         val level = levelOf(free, warn, stop)
@@ -106,7 +105,7 @@ object DiskGuard {
         }
         // 低于告警线且开了循环录像：删到回到告警线以上
         val result = cleanup(context, keepProvider, warn)
-        val after = freeBytes()
+        val after = freeBytes(context)
         return Status(
             levelOf(after, warn, stop),
             after,
@@ -139,14 +138,14 @@ object DiskGuard {
         var freed = 0L
         var removed = 0
         val candidates = try {
-            collectVideoFiles()
+            collectVideoFiles(context)
         } catch (e: Exception) {
             Log.w(TAG, "collect failed", e)
             return CleanupResult(0, 0)
         }
         val deleted = ArrayList<File>()
         for (f in candidates) {
-            if (freeBytes() >= targetBytes) break
+            if (freeBytes(context) >= targetBytes) break
             // 每删一个都重查：清理期间可能已经切到新分段
             if (f.name == keepProvider()) continue
             val size = f.length()
@@ -174,8 +173,8 @@ object DiskGuard {
     }
 
     /** 已结束的分段，按修改时间从旧到新 */
-    private fun collectVideoFiles(): List<File> {
-        val root = videoDir()
+    private fun collectVideoFiles(context: Context): List<File> {
+        val root = videoDir(context)
         val days = root.listFiles { f -> f.isDirectory } ?: return emptyList()
         val out = ArrayList<File>()
         for (day in days) {

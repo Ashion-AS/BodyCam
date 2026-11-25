@@ -29,6 +29,7 @@ class SettingsActivity : Activity() {
     private lateinit var swTopBarRule: Switch
     private lateinit var swDockRule: Switch
     private lateinit var rgZoomSliderLength: RadioGroup
+    private lateinit var rgStorageMode: RadioGroup
     private lateinit var rgDiskWarn: RadioGroup
     private lateinit var rgBatteryWarn: RadioGroup
     private lateinit var rgVideoSize: RadioGroup
@@ -70,6 +71,7 @@ class SettingsActivity : Activity() {
         swTopBarRule = findViewById(R.id.swTopBarRule)
         swDockRule = findViewById(R.id.swDockRule)
         rgZoomSliderLength = findViewById(R.id.rgZoomSliderLength)
+        rgStorageMode = findViewById(R.id.rgStorageMode)
         rgDiskWarn = findViewById(R.id.rgDiskWarn)
         rgBatteryWarn = findViewById(R.id.rgBatteryWarn)
         rgVideoSize = findViewById(R.id.rgVideoSize)
@@ -145,6 +147,7 @@ class SettingsActivity : Activity() {
         buildAudioOptions()
         buildWatermarkOptions()
         buildZoomSliderLengthOptions()
+        buildStorageModeOptions()
         updateSections()
     }
 
@@ -255,6 +258,23 @@ class SettingsActivity : Activity() {
             rgZoomSliderLength, options, SettingsStore.zoomSliderLength(this)
         ) { level ->
             SettingsStore.setZoomSliderLength(this, level)
+        }
+    }
+
+    /** 存储位置：默认存储 / 兼容存储 */
+    private fun buildStorageModeOptions() {
+        val options = listOf(
+            false to getString(R.string.settings_storage_mode_default),
+            true to getString(R.string.settings_storage_mode_compat)
+        )
+        buildSegment(
+            rgStorageMode, options, SettingsStore.isCompatStorage(this)
+        ) { compat ->
+            SettingsStore.setCompatStorage(this, compat)
+            // 权限要求随存储模式变化：兼容模式不需要「所有文件访问」，
+            // 默认存储则需要。切完立刻刷新下面那行权限状态，避免误导
+            updateStorageRow()
+            toast(getString(R.string.settings_storage_mode_switched))
         }
     }
 

@@ -6,6 +6,7 @@ import android.media.MediaScannerConnection
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.dsh.bodycam.core.SettingsStore
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
@@ -14,12 +15,16 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 输出落盘：直接写公共存储，再让 MediaScanner 把文件索引进相册/音乐库。
+ * 输出落盘：直接写文件，再让 MediaScanner 把文件索引进相册/音乐库。
  *
- * 目录约定（与系统 DCIM 同级，统一放在 BodyCam 下，按类型再按天分文件夹）：
- *   /sdcard/BodyCam/Video/yyyyMMdd/  视频
- *   /sdcard/BodyCam/Image/yyyyMMdd/  照片
- *   /sdcard/BodyCam/Audio/yyyyMMdd/  录音
+ * 目录约定（统一放在 BodyCam 下，按类型再按天分文件夹）：
+ *   BodyCam/Video/yyyyMMdd/  视频
+ *   BodyCam/Image/yyyyMMdd/  照片
+ *   BodyCam/Audio/yyyyMMdd/  录音
+ *
+ * 根目录有两种，由设置页「存储位置」决定，结构与命名完全一致（见 [root]）：
+ *   默认存储  /sdcard/BodyCam/...，即与系统 DCIM 同级，其它应用可见
+ *   兼容存储  Android/data/<pkg>/files/BodyCam/...，应用私有目录
  *
  * 为什么不用 MediaStore.insert：Android 11+ 的 MediaProvider 只允许媒体插入到
  * 固定白名单目录（Images→DCIM/Pictures，Audio→Music/Ringtones，Files→Download/
@@ -28,7 +33,7 @@ import java.util.Locale
  * + [MediaScannerConnection] 扫描：文件系统层面不受白名单限制，扫描器会把任意
  * 位置下的媒体文件正常索引进媒体库。
  *
- * 权限：
+ * 权限（仅默认存储需要，兼容存储写私有目录，系统不设门槛）：
  *   API 30+  需要「所有文件访问」权限（MANAGE_EXTERNAL_STORAGE），由
  *            [StoragePermission] 引导用户在系统设置里开启。
  *   API 26-29 需要 WRITE_EXTERNAL_STORAGE（Android 10 靠清单里的
@@ -47,6 +52,32 @@ object Storage {
 
     /** 与 DCIM 同级的应用根目录 */
     private const val ROOT = "BodyCam"
+
+    /**
+     * 当前存储模式的根目录（`.../BodyCam` 的父目录）。
+     *
+     * 两种模式只差根位置，下面的 `BodyCam/{Video,Image,Audio}/yyyyMMdd` 结构、
+     * 文件名规则、前缀全部一致：
+     *  - 默认存储：公共存储根，即 `/sdcard`，拼出 `/sdcard/BodyCam/...`
+     *  - 兼容存储：`getExternalFilesDir(null)`，拼出
+     *    `Android/data/<pkg>/files/BodyCam/...`
+     *
+     * 所有落盘与列举都从这里取根，不要在别处再写死路径。
+     */
+    fun root(context: Context): File =
+        if (SettingsStore.isCompatStorage(context)) {
+            // getExternalFilesDir 在极少数机型上会返回 null（外部存储未挂载）。
+            // 这时退回 filesDir，仍在本应用私有区，写入不会因权限失败。
+            context.getExternalFilesDir(null)
+                ?: File(context.filesDir, "external")
+        } else {
+            @Suppress("DEPRECATION")
+            Environment.getExternalStorageDirectory()
+        }
+
+    /** 某类型（Video/Image/Audio）的日目录父级：`<root>/BodyCam/<type>` */
+    private fun typeDirOf(context: Context, typeDir: String): File =
+        File(root(context), "$ROOT/$typeDir")
 
     /**
      * 建条目的失败原因。
@@ -254,8 +285,7 @@ object Storage {
      */
     fun list(context: Context, kind: Kind): List<MediaFile> {
         if (!StoragePermission.isGranted(context)) return emptyList()
-        @Suppress("DEPRECATION")
-        val root = File(Environment.getExternalStorageDirectory(), "$ROOT/${kind.dirName}")
+        val root = typeDirOf(context, kind.dirName)
         val days = root.listFiles { f -> f.isDirectory } ?: return emptyList()
         val out = ArrayList<MediaFile>()
         for (day in days) {
@@ -291,7 +321,7 @@ object Storage {
             return CreateResult.fail(FailReason.NO_PERMISSION)
         }
         @Suppress("DEPRECATION")
-        val dir = File(Environment.getExternalStorageDirectory(), "$ROOT/$typeDir/${today()}")
+        val dir = File(typeDirOf(context, typeDir), today())
         if (!dir.exists() && !dir.mkdirs()) {
             // mkdirs 失败有两种：目录其实已存在（并发/已建好），或真的建不出来。
             // 前者不是错误，继续往下；后者按失败上报。

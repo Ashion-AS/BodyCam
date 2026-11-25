@@ -1118,6 +1118,36 @@
                 android:paddingBottom="@dimen/space_xs"
                 android:text="@string/settings_section_other" />
 
+            <!-- 存储位置：默认存储 / 兼容存储 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_storage_mode_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgStorageMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_storage_mode_summary" />
+            </LinearLayout>
+
             <!-- 行 20：调试校准行开关（默认关闭） -->
             <LinearLayout
                 android:layout_width="match_parent"

@@ -131,7 +131,7 @@ class AudioRecordActivity : Activity(), TriggerRouter.Listener {
             return
         }
         // 录音要写公共存储：API 26-29 补申请运行时权限，30+ 引导「所有文件访问」
-        if (StoragePermission.needsRuntimePermission() &&
+        if (StoragePermission.needsRuntimePermission(this) &&
             !granted(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         ) {
             requestPermissions(

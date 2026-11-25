@@ -21,7 +21,8 @@ import java.util.concurrent.Executors
 
 /**
  * 文件管理页：三个 tab（图片 / 视频 / 音频），分别列出
- * `/sdcard/BodyCam/{Image,Video,Audio}/yyyyMMdd/` 下的文件，最新的在最上面。
+ * `BodyCam/{Image,Video,Audio}/yyyyMMdd/` 下的文件，最新的在最上面。
+ * 根目录随设置页的「存储位置」变化（公共存储 / 应用私有目录），见 [Storage.root]。
  *
  * 点文件进入 [ViewerActivity]：图片放大查看，视频与音频播放。
  * 不引入 TabLayout / RecyclerView，用系统控件保持依赖最小。

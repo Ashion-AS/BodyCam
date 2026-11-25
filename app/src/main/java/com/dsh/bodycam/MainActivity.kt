@@ -506,7 +506,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         }
         // API 26-29 直接写公共存储要这个运行时权限；30+ 改用「所有文件访问」，
         // 清单里已用 maxSdkVersion=29 卡住，那条走 StoragePermission 引导
-        if (StoragePermission.needsRuntimePermission() &&
+        if (StoragePermission.needsRuntimePermission(this) &&
             !granted(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         ) {
             needed += Manifest.permission.WRITE_EXTERNAL_STORAGE
