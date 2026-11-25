@@ -796,8 +796,8 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
 | 类型 | 查看方式 |
 | --- | --- |
 | 图片 | `ui/ZoomableImageView`：双指缩放（下限=适应屏幕、上限 4 倍）、拖动、双击在「适应屏幕 / 2 倍」间切换；解码前按屏幕尺寸算 `inSampleSize`，避免大图 OOM |
-| 视频 | media3 `ExoPlayer` + `PlayerView` **自带控制条**（播放/暂停、进度条、时间全是 ExoPlayer 官方样式，`show_timeout=0` 常驻不自动隐藏），进入即播；`onPause` 暂停 |
-| 音频 | 同一个 `ExoPlayer` / `PlayerView`，控制条照常可用；把 PlayerView 的遮罩底设透明，背后垫一个大话筒图标 |
+| 视频 | media3 `ExoPlayer` + `PlayerView` **自带控制条**（播放/暂停、进度条、时间全是 ExoPlayer 官方样式），进入即播；`onPause` 暂停。控制条 **出现 3 秒后自动隐藏**（`app:show_timeout="3000"`），点一下画面重新出现，静止 3 秒再消失 |
+| 音频 | 同一个 `ExoPlayer` / `PlayerView`，控制条行为同上；把 PlayerView 的遮罩底设透明，背后垫一个大话筒图标 |
 
 > 为什么不用系统 `VideoView` / `MediaPlayer`：成片是 fMP4（moof+mdat 分片、moov 无
 > 样本索引），系统 MediaPlayer 拖动进度条 seek 会报 `MEDIA_ERROR_UNKNOWN`

@@ -79,9 +79,10 @@
             android:visibility="gone" />
 
         <!--
-          视频与音频统一走 PlayerView 自带控制条（播放/暂停、进度、时间），
-          app:show_timeout 设为 0 = 控制条常驻、不自动隐藏，
-          现场操作时不用先点一下屏幕才出现按钮。
+          视频与音频统一走 PlayerView 自带控制条（播放/暂停、进度、时间）。
+          app:show_timeout = 3000：控制条出现后 3 秒自动隐藏；
+          点一下画面重新出现（media3 默认 hide_on_touch 负责切换），
+          再静止 3 秒又自动消失。设 0 会常驻，挡住画面。
         -->
         <androidx.media3.ui.PlayerView
             android:id="@+id/playerView"
@@ -89,7 +90,7 @@
             android:layout_height="match_parent"
             android:visibility="gone"
             app:show_buffering="when_playing"
-            app:show_timeout="0"
+            app:show_timeout="3000"
             app:use_controller="true" />
 
         <!--
