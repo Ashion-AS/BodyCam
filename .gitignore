@@ -1,5 +1,6 @@
 # ---- Gradle / 构建产物 ----
 .gradle/
+.kotlin/
 build/
 app/build/
 !gradle/wrapper/gradle-wrapper.jar
