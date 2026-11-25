@@ -72,4 +72,11 @@
     <dimen name="dropdown_row_height">40dp</dimen>
     <dimen name="dropdown_row_inset">13dp</dimen>
 
+    <!--
+      普通卡片（开关、输入框等）的上下边距：底部用 space_sm，顶部再少 2dp。
+      文字的首行上沿比行框上沿低约 3.4dp、末行下沿比行框下沿高约 1.4dp，
+      两者差 2dp，所以顶部要少留 2dp，上下看起来才一样高。
+    -->
+    <dimen name="card_pad_top">10dp</dimen>
+
 </resources>

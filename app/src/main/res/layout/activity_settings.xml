@@ -114,7 +114,8 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -154,7 +155,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -195,7 +197,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -225,7 +228,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -255,7 +259,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -285,7 +290,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -316,7 +322,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -346,7 +353,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -378,7 +386,8 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -417,7 +426,8 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -455,7 +465,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -516,7 +527,8 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_sm"
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm"
                 android:text="@string/settings_video_next_run_hint" />
 
             <!-- ==================== 录像设置 ==================== -->
@@ -538,7 +550,8 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -577,7 +590,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -600,7 +614,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -630,7 +645,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -665,7 +681,8 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -703,7 +720,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -733,7 +751,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -774,7 +793,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -804,7 +824,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -835,7 +856,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -879,7 +901,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -909,7 +932,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -954,7 +978,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -998,7 +1023,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -1077,7 +1103,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -1149,7 +1176,8 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -1188,7 +1216,8 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <LinearLayout
                     android:layout_width="0dp"
@@ -1226,7 +1255,8 @@
                 android:background="@drawable/bg_row"
                 android:orientation="vertical"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <TextView
                     style="@style/BodyCamLabel"
@@ -1268,7 +1298,8 @@
                 android:gravity="center_vertical"
                 android:orientation="horizontal"
                 android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
+                android:paddingTop="@dimen/card_pad_top"
+                android:paddingBottom="@dimen/space_sm">
 
                 <LinearLayout
                     android:layout_width="0dp"

@@ -616,7 +616,7 @@ btnIr.setOnClickListener {
 | 位置 | `showAsDropDown(..., Gravity.END)`，贴住行尾 | 系统 `PopupMenu` 固定从锚点**左边缘**弹出，值在右边、弹层在最左，视线要横跨整屏 |
 | 配色 | 底 `paper_2` + 描边 `rule_2` + 圆角 `radius_panel` | 系统弹层样式由主题决定，放进这套深色页面里像另一个 App 的控件 |
 | 选中态 | 当前项文字用 `accent`，其余 `ink` | 和页面里其它"当前值"的强调色一致 |
-| 间距 | 行高 `dropdown_row_height`(40dp) + 卡片底距 `dropdown_row_inset`(13dp) | 行内文字居中会自带约 13dp 空隙；底距取同值，上下视觉间距才相等 |
+| 间距 | 下拉行：行高 `dropdown_row_height`(40dp) + 卡片底距 `dropdown_row_inset`(13dp)；普通卡片：`card_pad_top`(10dp) + `space_sm`(12dp) | 行内文字居中会自带约 13dp 空隙，底距取同值即可对齐；普通卡片首行字上沿比行框低约 3.4dp、末行字下沿比行框高约 1.4dp，差 2dp，所以顶部再少留 2dp |
 
 > 早期版本是平铺的分段按钮（`RadioGroup` / 两行两列网格）。档位一多就占掉半屏，
 > 而且 `3840×2160 · 8M` 这类长标签会被挤扁。改成下拉后每行固定 40dp，
