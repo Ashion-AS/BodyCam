@@ -180,6 +180,18 @@ class MainActivity : Activity(), TriggerRouter.Listener {
      */
     private var firstFrameSeen = false
 
+    /**
+     * 上一次渲染层判定的真实横竖。
+     *
+     * 切摄后首帧兜底优先沿用旧摄像头的判断：DSJ-D100 这类 MTK 机型前后摄
+     * SENSOR_ORIENTATION 都报 0、实际输出横向帧，而屏幕是竖屏——若首帧兜底用
+     * 屏幕方向，新摄像头第一帧会把横向画面塞进竖幅 cover 视口，明显扁一下，
+     * 第二帧才被 syncOrientationIfNeeded 校正回来。
+     * 前后摄横竖通常一致，沿用旧值即可让第一帧就是对的；万一横竖相反，
+     * 首帧后仍会自动校正，安全性不降。
+     */
+    private var lastRendererPortrait: Boolean? = null
+
     private var recording = false
     private var recordStartElapsed = 0L
     private var resumed = false
@@ -882,16 +894,21 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
         val shortSide = minOf(streamW, streamH)
         val longSide = maxOf(streamW, streamH)
-        // 首帧前渲染层还没算出真实变换矩阵，先用屏幕方向兜底；首帧后以渲染层为准。
+        // 首帧前渲染层还没算出真实变换矩阵，先兜底；首帧后以渲染层为准。
+        // 兜底顺序：上一个摄像头的真实判断 → 屏幕方向。
+        // 切摄时首帧必须优先沿用旧值：DSJ-D100 是竖屏设备但实际输出横向帧，
+        // 用屏幕方向兜底会让新摄像头第一帧被排成竖幅而压扁。前后摄横竖通常
+        // 一致，沿用旧值首帧即正确；即使相反，首帧后 syncOrientationIfNeeded
+        // 也会自动校正。
         // 不用旋转角奇偶兜底：校准偏移会把 sensor=90 的机型（小米 14）算成 0/180，
         // 那样启动瞬间会先排成横幅再翻回竖屏，用户能看见一次画幅跳动。
-        val portrait = if (firstFrameSeen) {
-            pipeline?.isUprightPortrait
-                ?: (resources.configuration.orientation ==
-                        android.content.res.Configuration.ORIENTATION_PORTRAIT)
-        } else {
+        val screenPortrait =
             resources.configuration.orientation ==
                     android.content.res.Configuration.ORIENTATION_PORTRAIT
+        val portrait = if (firstFrameSeen) {
+            pipeline?.isUprightPortrait ?: lastRendererPortrait ?: screenPortrait
+        } else {
+            lastRendererPortrait ?: screenPortrait
         }
         val newW = if (portrait) shortSide else longSide
         val newH = if (portrait) longSide else shortSide
@@ -917,6 +934,8 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         if (recording || savingSegment) return
         val p = pipeline ?: return
         val rendererPortrait = p.isUprightPortrait
+        // 记下这次的真实判断，供下次切摄的首帧兜底沿用
+        lastRendererPortrait = rendererPortrait
         val currentPortrait = videoH > videoW
         if (rendererPortrait != currentPortrait) {
             applyOrientation()
