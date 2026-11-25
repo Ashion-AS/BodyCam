@@ -2,10 +2,16 @@ package com.dsh.bodycam
 
 import android.app.Activity
 import android.os.Bundle
+import android.text.TextUtils
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.Menu
 import android.view.View
+import android.view.ViewGroup
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.RadioButton
+import android.widget.PopupMenu
 import android.widget.RadioGroup
 import android.widget.Switch
 import android.widget.TextView
@@ -191,16 +197,14 @@ class SettingsActivity : Activity() {
     private fun hintResFor(count: Int, normalRes: Int, unsupportedRes: Int): Int =
         if (count <= 1) unsupportedRes else normalRes
 
+    /** 每行下拉框本体，按原选项容器的 id 索引：updateSections 需要单独置灰某一行 */
+    private val dropdownRowOf = HashMap<Int, View>()
+
     /**
-     * 分段控件：往 [group] 里塞一排可选项。
+     * 分段选项：把「标题 + 一排按钮」就地改造成一行下拉框。
      *
-     * 设置页有六组同类选项（预录时长、补光、模式、质量、尺寸、连拍间隔/张数），
-     * 观感必须一致，所以统一在这里生成：48dp 可点高度、单格宽度随文字、
-     * 选中态由 bg_pre_record_option 的 state_checked 决定。
-     *
-     * @param options 每项的值（tag）与显示文字
-     * @param current 当前选中的值
-     * @param onPick 选中回调，只在该项真的变化时触发
+     * 改造成本集中在 [bindDropdownRow] 一处，设置页 18 组选项的 XML 与各自的
+     * 持久化逻辑都不用动——各 buildXxxOptions() 只是换了个渲染方式。
      */
     private fun <T> buildSegment(
         group: RadioGroup,
@@ -208,39 +212,119 @@ class SettingsActivity : Activity() {
         current: T,
         onPick: (T) -> Unit
     ) {
-        group.orientation = RadioGroup.HORIZONTAL
-        group.removeAllViews()
-        options.forEach { (value, label) ->
-            val rb = RadioButton(this).apply {
-                id = View.generateViewId()
-                text = label
-                textSize = 14f
-                setTextColor(resources.getColorStateList(R.color.pre_record_option_text, theme))
-                setButtonDrawable(null)
-                setBackgroundResource(R.drawable.bg_pre_record_option)
-                minHeight = resources.getDimensionPixelSize(R.dimen.touch_target)
-                minWidth = resources.getDimensionPixelSize(R.dimen.touch_target)
-                gravity = android.view.Gravity.CENTER
-                setPadding(
-                    resources.getDimensionPixelSize(R.dimen.space_sm),
-                    0,
-                    resources.getDimensionPixelSize(R.dimen.space_sm),
-                    0
-                )
-                isChecked = value == current
-                tag = value
-            }
-            val lp = RadioGroup.LayoutParams(
-                RadioGroup.LayoutParams.WRAP_CONTENT,
-                RadioGroup.LayoutParams.WRAP_CONTENT
+        bindDropdownRow(
+            anchor = group,
+            labels = options.map { it.second },
+            selectedIndex = options.indexOfFirst { it.first == current },
+            onPick = { index -> onPick(options[index].first) }
+        )
+    }
+
+    /**
+     * 把 [anchor] 所在的那一行改造成下拉行：标题居左，当前值 + ▾ 居右。
+     *
+     * 标题就是布局里 anchor 前面那个 TextView，直接搬进新行复用（样式、文案不变）；
+     * 原选项容器设为 GONE，只作定位锚点。这样 XML 一行不用改，行内的说明文字
+     * 也仍然排在下拉行下面。
+     *
+     * @param labels        下拉项文案
+     * @param selectedIndex 当前值在 [labels] 中的下标（-1 表示没有匹配，显示空值）
+     * @param onPick        选中回调，参数为下标
+     */
+    private fun bindDropdownRow(
+        anchor: View,
+        labels: List<String>,
+        selectedIndex: Int,
+        onPick: (Int) -> Unit
+    ) {
+        val parent = anchor.parent as? ViewGroup ?: return
+        val anchorIndex = parent.indexOfChild(anchor)
+        val labelView = if (anchorIndex > 0) parent.getChildAt(anchorIndex - 1) as? TextView else null
+        // 标题原本的上下留白要跟着搬到新行（连拍那行的第二组带 marginTop）
+        val topMargin =
+            (labelView?.layoutParams as? ViewGroup.MarginLayoutParams)?.topMargin ?: 0
+
+        var current = selectedIndex
+
+        val valueView = TextView(this).apply {
+            text = labels.getOrElse(current) { "" }
+            setTextColor(getColor(R.color.ink_2))
+            setTextSize(
+                TypedValue.COMPLEX_UNIT_PX,
+                resources.getDimension(R.dimen.text_md)
             )
-            lp.marginEnd = resources.getDimensionPixelSize(R.dimen.space_xs)
-            group.addView(rb, lp)
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+            layoutParams = LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f
+            ).apply { marginEnd = resources.getDimensionPixelSize(R.dimen.space_xs) }
         }
-        group.setOnCheckedChangeListener { _, checkedId ->
-            val rb = findViewById<RadioButton>(checkedId) ?: return@setOnCheckedChangeListener
-            @Suppress("UNCHECKED_CAST")
-            onPick(rb.tag as T)
+
+        val arrowSize = resources.getDimensionPixelSize(R.dimen.space_md)
+        val arrow = ImageView(this).apply {
+            setImageResource(R.drawable.ic_arrow_drop_down)
+            layoutParams = LinearLayout.LayoutParams(arrowSize, arrowSize)
+            // 纯装饰，读屏时应与整行合并朗读
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = resources.getDimensionPixelSize(R.dimen.touch_target)
+            isClickable = true
+            isFocusable = true
+        }
+        // 水波纹交给主题的 selectableItemBackground，不自己造 drawable
+        val ripple = TypedValue()
+        if (theme.resolveAttribute(android.R.attr.selectableItemBackground, ripple, true)) {
+            row.setBackgroundResource(ripple.resourceId)
+        }
+
+        if (labelView != null) {
+            parent.removeView(labelView)
+            row.addView(
+                labelView,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            )
+        }
+        row.addView(valueView)
+        row.addView(arrow)
+
+        parent.addView(
+            row,
+            if (labelView != null) anchorIndex - 1 else anchorIndex,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { this.topMargin = topMargin }
+        )
+        anchor.visibility = View.GONE
+        dropdownRowOf[anchor.id] = row
+
+        row.setOnClickListener {
+            val popup = PopupMenu(this, row)
+            labels.forEachIndexed { index, label ->
+                popup.menu.add(Menu.NONE, index, index, label).apply {
+                    isCheckable = true
+                    isChecked = index == current
+                }
+            }
+            popup.menu.setGroupCheckable(Menu.NONE, true, true)
+            popup.setOnMenuItemClickListener { item ->
+                val index = item.itemId
+                if (index in labels.indices) {
+                    current = index
+                    valueView.text = labels[index]
+                    onPick(index)
+                }
+                true
+            }
+            popup.show()
         }
     }
 
@@ -360,9 +444,8 @@ class SettingsActivity : Activity() {
     /**
      * 拍照尺寸：1280×720 / 1920×1080 / 2560×1440 / 3840×2160（标 M 数）。
      *
-     * 四档标签较长，一行放不下四个，所以排成两列两行、每格等宽。
-     * 行内用 LinearLayout 分权重，因此不能用 RadioGroup（它只认直接子项，
-     * 嵌套一层就失去互斥），选中态自己维护。
+     * 四档文案较长，原来排成两列两行的网格；现在统一收进一行下拉框，
+     * 当前尺寸显示在标题右边，点开再选。
      */
     private fun buildPhotoSizeOptions() {
         val sizes = AppConfig.photoSizeOptions()
@@ -374,83 +457,8 @@ class SettingsActivity : Activity() {
                 w, h, Math.round(w.toLong() * h / 1_000_000.0).toInt()
             )
         }
-        // 四档标签较长，一行放不下四个，改成两列两行
-        buildOptionGrid(llPhotoSize, labels, current, columns = 2) { index ->
+        bindDropdownRow(llPhotoSize, labels, current) { index ->
             SettingsStore.setPhotoSizeIndex(this, index)
-        }
-    }
-
-    /**
-     * 把一组选项按网格排进 [container]：每行 [columns] 格、每格等宽。
-     *
-     * 用于标签较长的档位（拍照尺寸、分段时长）：排成一行会被压扁变形。
-     * 不能用 RadioGroup 做容器——它只认直接子项，嵌套一层的按钮就失去互斥，
-     * 所以选中态在这里自己维护。
-     *
-     * 末行不满格时补一个透明占位（如 5 档 3 列 → 3+2，第二行右侧留白），
-     * 否则剩下两格按权重摊满整行，会比上一行宽、边缘对不齐。
-     */
-    private fun buildOptionGrid(
-        container: LinearLayout,
-        labels: List<String>,
-        current: Int,
-        columns: Int,
-        onPick: (Int) -> Unit
-    ) {
-        val buttons = mutableListOf<RadioButton>()
-        val gap = resources.getDimensionPixelSize(R.dimen.space_xs)
-
-        fun buildRow(start: Int): LinearLayout {
-            val line = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { topMargin = gap }
-            }
-            for (slot in 0 until columns) {
-                val index = start + slot
-                val isLastSlot = slot == columns - 1
-                // 只在格与格之间留缝：末格加右边距会让同一行的格子宽度不等
-                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                if (!isLastSlot) lp.marginEnd = gap
-
-                if (index > labels.lastIndex) {
-                    // 占位撑住最后一列的宽度，高度 1px 不参与测量
-                    line.addView(View(this), lp.apply {
-                        height = 1
-                    })
-                    continue
-                }
-
-                val rb = RadioButton(this).apply {
-                    id = View.generateViewId()
-                    text = labels[index]
-                    textSize = 14f
-                    setTextColor(
-                        resources.getColorStateList(R.color.pre_record_option_text, theme)
-                    )
-                    setButtonDrawable(null)
-                    setBackgroundResource(R.drawable.bg_pre_record_option)
-                    minHeight = resources.getDimensionPixelSize(R.dimen.touch_target)
-                    gravity = android.view.Gravity.CENTER
-                    isChecked = index == current
-                    tag = index
-                }
-                rb.setOnClickListener {
-                    // 互斥：其余取消选中，再写入设置
-                    buttons.forEach { other -> other.isChecked = other === rb }
-                    onPick(index)
-                }
-                buttons += rb
-                line.addView(rb, lp)
-            }
-            return line
-        }
-
-        container.removeAllViews()
-        for (start in labels.indices step columns) {
-            container.addView(buildRow(start))
         }
     }
 
@@ -567,12 +575,11 @@ class SettingsActivity : Activity() {
         val segments = AppConfig.SEGMENT_MINUTE_OPTIONS.map {
             getString(R.string.settings_segment_fmt, it)
         }
-        // 5 档带「分钟」后缀，一行排不下会被压扁，改成每行 4 格、共 2 行。
+        // 5 档带「分钟」后缀，原先 4 格一行排两行；现在统一收进一行下拉框。
         // segmentMinutes 读的时候已把档位外的旧值归一成默认档，这里 indexOf 不会返回 -1
-        buildOptionGrid(
+        bindDropdownRow(
             llSegmentMinutes, segments,
-            AppConfig.SEGMENT_MINUTE_OPTIONS.indexOf(SettingsStore.segmentMinutes(this)),
-            columns = 4
+            AppConfig.SEGMENT_MINUTE_OPTIONS.indexOf(SettingsStore.segmentMinutes(this))
         ) { index ->
             SettingsStore.setSegmentMinutes(this, AppConfig.SEGMENT_MINUTE_OPTIONS[index])
         }
@@ -625,10 +632,9 @@ class SettingsActivity : Activity() {
         val segments = AppConfig.SEGMENT_MINUTE_OPTIONS.map {
             getString(R.string.settings_segment_fmt, it)
         }
-        buildOptionGrid(
+        bindDropdownRow(
             llAudioSegmentMinutes, segments,
-            AppConfig.SEGMENT_MINUTE_OPTIONS.indexOf(SettingsStore.audioSegmentMinutes(this)),
-            columns = 4
+            AppConfig.SEGMENT_MINUTE_OPTIONS.indexOf(SettingsStore.audioSegmentMinutes(this))
         ) { index ->
             SettingsStore.setAudioSegmentMinutes(this, AppConfig.SEGMENT_MINUTE_OPTIONS[index])
         }
@@ -652,10 +658,9 @@ class SettingsActivity : Activity() {
         )
         for ((corner, container) in corners) {
             val current = SettingsStore.watermarkField(this, corner)
-            buildOptionGrid(
+            bindDropdownRow(
                 container, labels,
-                WATERMARK_FIELD_IDS.indexOfFirst { it.first == current },
-                columns = 2
+                WATERMARK_FIELD_IDS.indexOfFirst { it.first == current }
             ) { index ->
                 SettingsStore.setWatermarkField(this, corner, WATERMARK_FIELD_IDS[index].first)
             }
@@ -684,10 +689,8 @@ class SettingsActivity : Activity() {
         val preOn = swPreRecord.isChecked
         durationSection.alpha = if (preOn) 1f else 0.4f
         durationSection.isEnabled = preOn
-        rgDuration.isEnabled = preOn
-        for (i in 0 until rgDuration.childCount) {
-            rgDuration.getChildAt(i).isEnabled = preOn
-        }
+        // 选项已收进下拉行：置灰要落在那一行上（RadioGroup 现在只是隐藏的定位锚点）
+        dropdownRowOf[R.id.rgDuration]?.isEnabled = preOn
 
         val burst = SettingsStore.photoMode(this) == AppConfig.PHOTO_MODE_BURST
         photoModeSummary.text = getString(
