@@ -247,7 +247,8 @@ class SettingsActivity : Activity() {
 
         val valueView = TextView(this).apply {
             text = labels.getOrElse(current) { "" }
-            setTextColor(getColor(R.color.ink_2))
+            // 与弹层里的选中项同色：设置页一眼就能看出"当前值"是这一项
+            setTextColor(getColor(R.color.accent))
             setTextSize(
                 TypedValue.COMPLEX_UNIT_PX,
                 resources.getDimension(R.dimen.text_md)

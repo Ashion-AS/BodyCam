@@ -190,8 +190,13 @@ object AppConfig {
         3840 to 2160
     )
 
-    /** 尺寸档位下标；持久化的是下标，不是像素，设备换机后仍能落到合理档位 */
-    const val PHOTO_SIZE_DEFAULT_INDEX = 1
+    /**
+     * 尺寸档位下标；持久化的是下标，不是像素，设备换机后仍能落到合理档位。
+     *
+     * 默认 2560×1440（标 4M）：1280×720 太小、3840×2160 单张写盘偏慢，
+     * 4M 在细节与连拍速度之间比较平衡。
+     */
+    const val PHOTO_SIZE_DEFAULT_INDEX = 2
 
     /** 连拍间隔（毫秒）与张数的可选档位 */
     val BURST_INTERVAL_OPTIONS = intArrayOf(1, 2, 3, 5)
