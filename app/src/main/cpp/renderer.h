@@ -41,6 +41,12 @@ public:
     /** 摄像头输出用的 OES 纹理名（在 start() 成功后有效） */
     int cameraTexture() const { return cameraTexId_.load(); }
 
+    /**
+     * 当前总变换（SurfaceTexture 自带矩阵 × 校准旋转）下画面是竖幅还是横幅。
+     * 不同机型的变换矩阵可能自带一次 90° 旋转，写死横/竖屏会压扁。
+     */
+    bool uprightPortrait() const { return uprightPortrait_.load(); }
+
     /** 绑定 SurfaceTexture 的全局引用（所有权转移给渲染器）；失败时调用方负责释放 */
     bool attachSurfaceTexture(jobject surfaceTextureGlobalRef);
 
@@ -185,6 +191,9 @@ private:
 
     /** 画面旋转角度，0/90/180/270（作用在纹理坐标上） */
     float rotationDeg_ = 0.0f;
+
+    /** 当前总变换下画面是否为竖幅（由 drawScene 每次绘制时更新） */
+    std::atomic<bool> uprightPortrait_{false};
 
     // ---- SurfaceTexture ----
     jobject stObject_ = nullptr;

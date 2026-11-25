@@ -570,9 +570,17 @@ void GlRenderer::drawScene(int targetWidth, int targetHeight, bool fitInside,
 
     int vpX = 0, vpY = 0, vpW = targetWidth, vpH = targetHeight;
     if (fitInside) {
-        // 预览铺满屏幕（cover）：宁可裁掉一点点边缘，也不要上下/左右黑边
-        const float scale = std::max(static_cast<float>(targetWidth) / videoW_,
-                                     static_cast<float>(targetHeight) / videoH_);
+        // 按画面实际横竖选缩放方式（用上一帧的结果，差一帧无感）：
+        //   竖幅 —— cover，铺满屏幕，宁可裁掉一点边缘也不留黑边（与之前一致）；
+        //   横幅 —— contain，等比缩放完整显示，屏幕与画面方向不一致时留黑边。
+        // 有机型（MTK DSJ-D100）传感器上报 orientation=0、实际输出横向帧且变换矩阵
+        // 不做预旋转，对它强行 cover 会把横向画面压进竖屏视口，这就是画面被压扁的成因。
+        const bool portrait = uprightPortrait_.load();
+        const float scale = portrait
+                ? std::max(static_cast<float>(targetWidth) / videoW_,
+                           static_cast<float>(targetHeight) / videoH_)
+                : std::min(static_cast<float>(targetWidth) / videoW_,
+                           static_cast<float>(targetHeight) / videoH_);
         vpW = static_cast<int>(videoW_ * scale);
         vpH = static_cast<int>(videoH_ * scale);
         vpX = (targetWidth - vpW) / 2;
@@ -595,6 +603,8 @@ void GlRenderer::drawScene(int targetWidth, int targetHeight, bool fitInside,
     rotationMatrix2d(rotationDeg_, uvRot);
     float texM[16];
     multiply4(texMatrix_, uvRot, texM);
+    // 按 u 轴映射方向动态判断：不同机型变换矩阵可能自带 90°，写死横/竖屏会压扁
+    uprightPortrait_ = std::fabs(texM[1]) > std::fabs(texM[0]);
     glUniformMatrix4fv(camTexMatrixLoc_, 1, GL_FALSE, texM);
 
     const GLfloat identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
@@ -745,6 +755,10 @@ void GlRenderer::setVideoSize(int width, int height) {
     post([this, width, height]() {
         videoW_ = width;
         videoH_ = height;
+        // 预览缩放要读 uprightPortrait_，而它正常由 drawScene 每帧按变换矩阵算出。
+        // 出首帧之前先用目标画幅给个初值，否则竖屏机首帧会闪一下黑边；
+        // 之后每帧都会被真实变换矩阵覆盖，画幅变化时也能立刻跟上。
+        uprightPortrait_ = height > width;
     });
 }
 

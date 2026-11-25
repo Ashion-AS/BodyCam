@@ -44,6 +44,13 @@ Java_com_dsh_bodycam_gl_WatermarkEngine_nativeCameraTexture(JNIEnv* /*env*/, job
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
+Java_com_dsh_bodycam_gl_WatermarkEngine_nativeIsPortrait(JNIEnv* /*env*/, jobject /*thiz*/,
+                                                         jlong handle) {
+    GlRenderer* r = toRenderer(handle);
+    return r && r->uprightPortrait() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_dsh_bodycam_gl_WatermarkEngine_nativeAttachSurfaceTexture(JNIEnv* env, jobject /*thiz*/,
                                                                   jlong handle, jobject surfaceTexture) {
     GlRenderer* r = toRenderer(handle);

@@ -15,6 +15,7 @@ object WatermarkEngine {
 
     external fun nativeCreate(videoWidth: Int, videoHeight: Int): Long
     external fun nativeCameraTexture(handle: Long): Int
+    external fun nativeIsPortrait(handle: Long): Boolean
     external fun nativeAttachSurfaceTexture(handle: Long, surfaceTexture: SurfaceTexture): Boolean
     external fun nativeSetPreviewWindow(handle: Long, surface: Surface?, viewWidth: Int, viewHeight: Int): Boolean
     external fun nativeUpdatePreviewSize(handle: Long, viewWidth: Int, viewHeight: Int)

@@ -171,6 +171,13 @@ class MainActivity : Activity(), TriggerRouter.Listener {
      */
     private var rotationOffset = 0
 
+    /**
+     * 渲染层是否已经画出过一帧。
+     * 首帧之前 SurfaceTexture 的变换矩阵还没取到，[GlPipeline.isUprightPortrait]
+     * 恒为 false，不能拿来判断横竖，只能用旋转角奇偶兜底。
+     */
+    private var firstFrameSeen = false
+
     private var recording = false
     private var recordStartElapsed = 0L
     private var resumed = false
@@ -520,6 +527,7 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
     private fun setup() {
         if (pipeline != null) return
+        firstFrameSeen = false
         cameras = CameraController.listCameras(this)
         val savedId = SettingsStore.cameraId(this)
         // 从已枚举的列表里挑，避免再扫一遍 CameraCharacteristics
@@ -548,7 +556,13 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         val st = SurfaceTexture(p.cameraTextureId)
         // 这里必须是相机流尺寸，不能是输出尺寸
         st.setDefaultBufferSize(streamW, streamH)
-        st.setOnFrameAvailableListener({ p.onFrameAvailable() }, uiHandler)
+        st.setOnFrameAvailableListener({
+            p.onFrameAvailable()
+            // onFrameAvailable 只是把绘制投递到渲染线程，本帧还没画，
+            // uprightPortrait 仍是初始值。首帧只做标记，从第二帧起渲染层已有
+            // 真实变换矩阵再逐帧比对（一致时 syncOrientationIfNeeded 立即返回）。
+            if (firstFrameSeen) syncOrientationIfNeeded() else firstFrameSeen = true
+        }, uiHandler)
         surfaceTexture = st
         p.attachSurfaceTexture(st)
 
@@ -609,13 +623,20 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         val id = currentSpec?.cameraId
         val fallback = defaultRotationOffset(sensorOrientation)
-        rotationOffset = when {
-            id == null -> fallback
-            prefs.contains(rotationKey(id)) -> prefs.getInt(rotationKey(id), fallback)
-            // 后摄沿用旧版全局键（老版本只校准过后摄）
-            currentSpec?.isFront == false ->
-                prefs.getInt(KEY_ROTATION_OFFSET, fallback)
-            else -> fallback
+        // 传感器角为 0 的机型（如 MTK DSJ-D100）SurfaceTexture 变换矩阵不做预旋转，
+        // 画幅与方向全靠渲染层动态判断。这类设备固定用默认偏移，忽略历史校准值，
+        // 避免被误点调试行写进去的 90/270 带偏方向。
+        rotationOffset = if (sensorOrientation == 0) {
+            fallback
+        } else {
+            when {
+                id == null -> fallback
+                prefs.contains(rotationKey(id)) -> prefs.getInt(rotationKey(id), fallback)
+                // 后摄沿用旧版全局键（老版本只校准过后摄）
+                currentSpec?.isFront == false ->
+                    prefs.getInt(KEY_ROTATION_OFFSET, fallback)
+                else -> fallback
+            }
         }
     }
 
@@ -743,6 +764,9 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         applyCameraSpec(next)
         // 每个摄像头有自己的校准偏移，切过去必须换一套，否则画面方向是错的
         loadRotationOffset()
+        // 前后摄的变换矩阵可能不同（横竖都可能相反），旧摄像头的判断不能沿用，
+        // 复位后先按旋转角兜底，等新摄像头出帧再自动校正
+        firstFrameSeen = false
         // 流尺寸可能不同（前后摄支持的分辨率集合不一样），SurfaceTexture 要跟着改，
         // 否则相机会按旧尺寸出帧、画面被拉伸
         surfaceTexture?.setDefaultBufferSize(streamW, streamH)
@@ -826,21 +850,32 @@ class MainActivity : Activity(), TriggerRouter.Listener {
     /**
      * 计算画幅与旋转角。
      *
-     * 画幅跟随**屏幕方向**，不跟旋转角走：
-     * 竖屏就是竖屏（1080×1920），横屏就是横屏（1920×1080）。
-     * 之前画幅由旋转角决定，一旦校准到 0/180 就退回横屏画幅，
-     * 竖屏下预览会变成中间一条横的画面，还会被拉伸。
+     * 画幅不再跟随屏幕方向，而是跟随**渲染层判断的实际横竖**：
+     * 有些机型（如 MTK DSJ-D100）传感器上报 orientation=0，实际却输出横向帧且
+     * SurfaceTexture 变换矩阵不做预旋转，按屏幕方向写死画幅会把横向画面压进
+     * 竖屏视口——不旋转就压扁，转 90° 后方向又错。
+     * 渲染层按「纹理总变换矩阵 × 校准旋转」算出真实横竖（[GlPipeline.isUprightPortrait]），
+     * 这里据此决定长边放哪一维。
      */
     private fun applyOrientation() {
         autoRotationDeg = computeRotation()
         rotationDeg = (autoRotationDeg + rotationOffset + 360) % 360
 
-        val portraitScreen = resources.configuration.orientation ==
-                android.content.res.Configuration.ORIENTATION_PORTRAIT
         val shortSide = minOf(streamW, streamH)
         val longSide = maxOf(streamW, streamH)
-        val newW = if (portraitScreen) shortSide else longSide
-        val newH = if (portraitScreen) longSide else shortSide
+        // 首帧前渲染层还没算出真实变换矩阵，先用屏幕方向兜底；首帧后以渲染层为准。
+        // 不用旋转角奇偶兜底：校准偏移会把 sensor=90 的机型（小米 14）算成 0/180，
+        // 那样启动瞬间会先排成横幅再翻回竖屏，用户能看见一次画幅跳动。
+        val portrait = if (firstFrameSeen) {
+            pipeline?.isUprightPortrait
+                ?: (resources.configuration.orientation ==
+                        android.content.res.Configuration.ORIENTATION_PORTRAIT)
+        } else {
+            resources.configuration.orientation ==
+                    android.content.res.Configuration.ORIENTATION_PORTRAIT
+        }
+        val newW = if (portrait) shortSide else longSide
+        val newH = if (portrait) longSide else shortSide
 
         if (newW != videoW || newH != videoH) {
             videoW = newW
@@ -854,6 +889,22 @@ class MainActivity : Activity(), TriggerRouter.Listener {
             )
         }
         updateDebugInfo()
+    }
+
+    /** 渲染层横竖判断与当前画幅不一致时，重新应用画幅（首帧后自动校正一次） */
+    private fun syncOrientationIfNeeded() {
+        // 录像/收尾期间画幅已经写进编码器，中途改尺寸会输出对不上的画面，
+        // 等下一次开录前 startRecording() 里的 applyOrientation() 再去校正
+        if (recording || savingSegment) return
+        val p = pipeline ?: return
+        val rendererPortrait = p.isUprightPortrait
+        val currentPortrait = videoH > videoW
+        if (rendererPortrait != currentPortrait) {
+            applyOrientation()
+            updateWatermark()
+            // 预录缓存按画幅建的编码器，画幅变了原缓存就作废，重开一次
+            applyPreRecordSetting()
+        }
     }
 
     // ------------------------------------------------------------ 录像参数

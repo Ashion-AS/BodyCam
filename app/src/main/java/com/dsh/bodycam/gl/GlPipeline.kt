@@ -20,6 +20,10 @@ class GlPipeline(val videoWidth: Int, val videoHeight: Int) {
     val cameraTextureId: Int
         get() = if (available) WatermarkEngine.nativeCameraTexture(handle) else 0
 
+    /** 当前总变换下画面是竖幅（短边 × 长边）还是横幅，用于动态决定输出画幅 */
+    val isUprightPortrait: Boolean
+        get() = available && WatermarkEngine.nativeIsPortrait(handle)
+
     fun attachSurfaceTexture(surfaceTexture: SurfaceTexture) {
         if (available) WatermarkEngine.nativeAttachSurfaceTexture(handle, surfaceTexture)
     }
