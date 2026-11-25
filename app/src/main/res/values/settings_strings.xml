@@ -3,6 +3,7 @@
     <string name="title_settings">设置</string>
 
     <!-- 分组标题 -->
+    <string name="settings_section_storage">存储设置</string>
     <string name="settings_section_encode">编码设置</string>
     <string name="settings_section_record">录像设置</string>
     <string name="settings_section_photo">拍照设置</string>

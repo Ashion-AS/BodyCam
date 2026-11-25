@@ -58,4 +58,18 @@
     <dimen name="zoom_slider_height_medium">187dp</dimen>
     <dimen name="zoom_slider_height_short">140dp</dimen>
 
+    <!-- 设置页下拉弹层：最小宽度保证短文案（高/中/低）也有像样的点击面，
+         抬升高度与行本身的描边一起把弹层和页面分开 -->
+    <dimen name="dropdown_min_width">160dp</dimen>
+    <dimen name="elevation_popup">8dp</dimen>
+
+    <!--
+      下拉行的行高与卡片底边距：两者要配着用。
+      行高 40dp 时文字上方的留白约 13dp（居中空隙 + 字体 ascent），
+      卡片底边距取 13dp，上下视觉间距才相等；再大一点就会回到"上边明显更空"。
+      行宽是整行（约 360dp），40dp 高度对拇指仍然够用。
+    -->
+    <dimen name="dropdown_row_height">40dp</dimen>
+    <dimen name="dropdown_row_inset">13dp</dimen>
+
 </resources>

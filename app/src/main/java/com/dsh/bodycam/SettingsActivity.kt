@@ -5,13 +5,12 @@ import android.os.Bundle
 import android.text.TextUtils
 import android.util.TypedValue
 import android.view.Gravity
-import android.view.Menu
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
+import android.widget.PopupWindow
 import android.widget.RadioGroup
 import android.widget.Switch
 import android.widget.TextView
@@ -272,7 +271,7 @@ class SettingsActivity : Activity() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = resources.getDimensionPixelSize(R.dimen.touch_target)
+            minimumHeight = resources.getDimensionPixelSize(R.dimen.dropdown_row_height)
             isClickable = true
             isFocusable = true
         }
@@ -306,26 +305,91 @@ class SettingsActivity : Activity() {
         anchor.visibility = View.GONE
         dropdownRowOf[anchor.id] = row
 
+        // 上下留白对齐：行高收到 40dp 后，文字上方的剩余空隙约 13dp；
+        // 卡片底边距也取 13dp，两边视觉间距才相等（原先容器上下都留 16dp，
+        // 加上行内居中留白，上边会比下边多出十几 dp）。
+        parent.setPadding(
+            parent.paddingLeft,
+            0,
+            parent.paddingRight,
+            resources.getDimensionPixelSize(R.dimen.dropdown_row_inset)
+        )
+
         row.setOnClickListener {
-            val popup = PopupMenu(this, row)
-            labels.forEachIndexed { index, label ->
-                popup.menu.add(Menu.NONE, index, index, label).apply {
-                    isCheckable = true
-                    isChecked = index == current
-                }
+            showDropdown(row, labels, current) { index ->
+                current = index
+                valueView.text = labels[index]
+                onPick(index)
             }
-            popup.menu.setGroupCheckable(Menu.NONE, true, true)
-            popup.setOnMenuItemClickListener { item ->
-                val index = item.itemId
-                if (index in labels.indices) {
-                    current = index
-                    valueView.text = labels[index]
+        }
+    }
+
+    /**
+     * 下拉弹层：右对齐到行尾，配色/圆角/间距全部走设计令牌。
+     *
+     * 不用系统 `PopupMenu` 的原因有两条：
+     * 1. 它固定从锚点左边缘弹出——本页视觉重心在右侧（值 + ▾ 都在右），
+     *    弹层跑到最左边，离当前值隔了大半屏；
+     * 2. 它的列表样式（背景、选中态）由系统主题决定，和 paper / ink / accent
+     *    这套令牌对不上，放进深色页面里像另一个 App 的控件。
+     */
+    private fun showDropdown(
+        anchor: View,
+        labels: List<String>,
+        selectedIndex: Int,
+        onPick: (Int) -> Unit
+    ) {
+        val hPad = resources.getDimensionPixelSize(R.dimen.space_md)
+        val vPad = resources.getDimensionPixelSize(R.dimen.space_sm)
+        val panelPad = resources.getDimensionPixelSize(R.dimen.space_2xs)
+        val minWidthPx = resources.getDimensionPixelSize(R.dimen.dropdown_min_width)
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.bg_dropdown_panel)
+            setPadding(0, panelPad, 0, panelPad)
+        }
+
+        val ripple = TypedValue()
+        val hasRipple =
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, ripple, true)
+
+        val popup = PopupWindow(
+            panel,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            true
+        ).apply {
+            elevation = resources.getDimension(R.dimen.elevation_popup)
+            isOutsideTouchable = true
+        }
+
+        labels.forEachIndexed { index, label ->
+            val item = TextView(this).apply {
+                text = label
+                // 选中项用强调色，其余用正文色：一眼能看出当前档位
+                setTextColor(getColor(if (index == selectedIndex) R.color.accent else R.color.ink))
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.text_md))
+                setPadding(hPad, vPad, hPad, vPad)
+                minWidth = minWidthPx
+                gravity = Gravity.START
+                isClickable = true
+                if (hasRipple) setBackgroundResource(ripple.resourceId)
+                setOnClickListener {
+                    popup.dismiss()
                     onPick(index)
                 }
-                true
             }
-            popup.show()
+            panel.addView(item)
         }
+
+        // Gravity.END：弹层右边缘贴住行尾，正好落在「值 + ▾」下方
+        popup.showAsDropDown(
+            anchor,
+            0,
+            resources.getDimensionPixelSize(R.dimen.space_2xs),
+            Gravity.END
+        )
     }
 
     /** 5/10/20/30s 四个单选按钮，横排 */

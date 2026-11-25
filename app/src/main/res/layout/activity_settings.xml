@@ -2,8 +2,12 @@
 <!--
   设置页：一张「登记表」，不是卡片流。
 
-  结构：按「编码 → 录像 → 拍照 → 录音 → 其他」分区，每区一个 muted 小标题；
+  结构：按「存储 → 编码 → 录像 → 拍照 → 录音 → 其他」分区，每区一个 muted 小标题；
   分组标题只是纸面上的栏目名，不铺底色、不加投影。
+
+  存储设置（放最顶部：先确认能写，再谈写哪儿）
+    行 0  存储访问权限（状态 + 去开启）
+    行 0b 存储位置（下拉框：默认存储 / 兼容存储）
 
   编码设置（决定编码器与成片规格）
     行 1  录像分辨率（下拉框）
@@ -20,7 +24,6 @@
     行 10 循环录像开关（空间不足时删最早分段）
     行 11 空间告警阈值（下拉框）
     行 12 电量告警阈值（下拉框）
-    行 13 存储访问权限（状态 + 去开启）
 
   拍照设置
     行 14 拍照补光（下拉框）
@@ -36,6 +39,8 @@
     行 20 调试校准行开关
 
   行与行之间共用 1dp 分隔线，行本身是 paper_2；不叠卡片、不加投影。
+  下拉行的行高与卡片上下边距由 SettingsActivity 统一收紧（见 dropdown_row_height /
+  dropdown_row_inset），保证文字上下的视觉间距相等。
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -82,6 +87,95 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingBottom="@dimen/space_xl">
+
+            <!-- ==================== 存储设置 ==================== -->
+            <!--
+              放在最顶部：先确认「能不能写」，再谈「写哪儿」。
+              权限没开时下面所有录制入口都会失败，这个顺序最不容易被忽略。
+            -->
+
+            <TextView
+                style="@style/BodyCamSection"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingTop="@dimen/space_lg"
+                android:paddingBottom="@dimen/space_xs"
+                android:text="@string/settings_section_storage" />
+
+            <!-- 行 1：存储访问权限（状态 + 去开启） -->
+            <LinearLayout
+                android:id="@+id/storageRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        style="@style/BodyCamLabel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_storage_title" />
+
+                    <TextView
+                        android:id="@+id/storageStatus"
+                        style="@style/BodyCamHint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/space_2xs" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/storageAction"
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/touch_target"
+                    android:layout_marginStart="@dimen/space_sm"
+                    android:gravity="center"
+                    android:paddingHorizontal="@dimen/space_sm"
+                    android:textColor="@color/accent" />
+            </LinearLayout>
+
+            <!-- 行 2：存储位置（默认存储 / 兼容存储） -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_row"
+                android:orientation="vertical"
+                android:paddingHorizontal="@dimen/space_md"
+                android:paddingVertical="@dimen/space_md">
+
+                <TextView
+                    style="@style/BodyCamLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/settings_storage_mode_title" />
+
+                <RadioGroup
+                    android:id="@+id/rgStorageMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_sm"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    style="@style/BodyCamHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/space_2xs"
+                    android:text="@string/settings_storage_mode_summary" />
+            </LinearLayout>
 
             <!-- ==================== 编码设置 ==================== -->
 
@@ -662,50 +756,6 @@
                     android:text="@string/settings_battery_warn_summary" />
             </LinearLayout>
 
-            <!-- 行 13：存储访问权限 -->
-            <LinearLayout
-                android:id="@+id/storageRow"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_row"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:orientation="horizontal"
-                android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        style="@style/BodyCamLabel"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_storage_title" />
-
-                    <TextView
-                        android:id="@+id/storageStatus"
-                        style="@style/BodyCamHint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="@dimen/space_2xs" />
-                </LinearLayout>
-
-                <TextView
-                    android:id="@+id/storageAction"
-                    style="@style/BodyCamLabel"
-                    android:layout_width="wrap_content"
-                    android:layout_height="@dimen/touch_target"
-                    android:layout_marginStart="@dimen/space_sm"
-                    android:gravity="center"
-                    android:paddingHorizontal="@dimen/space_sm"
-                    android:textColor="@color/accent" />
-            </LinearLayout>
-
             <!-- ==================== 拍照设置 ==================== -->
 
             <TextView
@@ -1209,36 +1259,6 @@
                 android:paddingTop="@dimen/space_lg"
                 android:paddingBottom="@dimen/space_xs"
                 android:text="@string/settings_section_other" />
-
-            <!-- 存储位置：默认存储 / 兼容存储 -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="@drawable/bg_row"
-                android:orientation="vertical"
-                android:paddingHorizontal="@dimen/space_md"
-                android:paddingVertical="@dimen/space_md">
-
-                <TextView
-                    style="@style/BodyCamLabel"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/settings_storage_mode_title" />
-
-                <RadioGroup
-                    android:id="@+id/rgStorageMode"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_sm"
-                    android:orientation="horizontal" />
-
-                <TextView
-                    style="@style/BodyCamHint"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="@dimen/space_2xs"
-                    android:text="@string/settings_storage_mode_summary" />
-            </LinearLayout>
 
             <!-- 行 20：调试校准行开关（默认关闭） -->
             <LinearLayout
