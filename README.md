@@ -796,8 +796,19 @@ PTS 按每段起点重新计算，单文件内从 0 单调递增，**任意一�
 | 类型 | 查看方式 |
 | --- | --- |
 | 图片 | `ui/ZoomableImageView`：双指缩放（下限=适应屏幕、上限 4 倍）、拖动、双击在「适应屏幕 / 2 倍」间切换；解码前按屏幕尺寸算 `inSampleSize`，避免大图 OOM |
-| 视频 | media3 `ExoPlayer` + `PlayerView` **自带控制条**（播放/暂停、进度条、时间全是 ExoPlayer 官方样式），进入即播；`onPause` 暂停。控制条 **出现 3 秒后自动隐藏**（`app:show_timeout="3000"`），点一下画面重新出现，静止 3 秒再消失 |
+| 视频 | media3 `ExoPlayer` + `PlayerView` **自带控制条**（播放/暂停、进度条、时间全是 ExoPlayer 官方样式），进入即播；`onPause` 暂停。控制条由 `ViewerActivity.armControls()` 统一控制：**就绪时显示一次、3 秒无操作自动收起；点画面重新出现，再静止 3 秒消失** |
 | 音频 | 同一个 `ExoPlayer` / `PlayerView`，控制条行为同上；把 PlayerView 的遮罩底设透明，背后垫一个大话筒图标 |
+
+> **为什么不直接用 `app:show_timeout`**：media3 那三个开关单独用都会出岔子——
+> `show_timeout=0` 常驻挡画面；默认的 `hide_on_touch` 是"点一下收起"的切换语义，
+> 与"点一下显示"相反；`auto_show` 又会在暂停/缓冲时自己弹出且不计时。
+> 所以三者全部关掉（`setControllerAutoShow(false)` / `setControllerHideOnTouch(false)` /
+> `setControllerShowTimeoutMs(0)`），只留 `showController()` / `hideController()` 两个原语，
+> 由 `armControls()` 驱动，超时值见 `CONTROLS_TIMEOUT_MS`（3000ms）。
+>
+> 计时重置挂在 `Activity.dispatchTouchEvent` 上而不是 PlayerView 的触摸回调：
+> 拖进度条、点播放键这些事件会被控制条内部子 View 消费掉，挂在 PlayerView 上收不到，
+> 就会出现"正在拖进度条，控制条却突然消失"。
 
 > 为什么不用系统 `VideoView` / `MediaPlayer`：成片是 fMP4（moof+mdat 分片、moov 无
 > 样本索引），系统 MediaPlayer 拖动进度条 seek 会报 `MEDIA_ERROR_UNKNOWN`
