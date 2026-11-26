@@ -80,10 +80,11 @@
 
         <!--
           视频与音频统一走 PlayerView 自带控制条（播放/暂停、进度、时间）。
-          显隐完全由 ViewerActivity 控制：进入播放先显示一次，之后 3 秒无操作自动隐藏，
-          点画面重新出现（任何触摸都会把倒计时重置）。
-          这里不设 show_timeout，auto_show / hide_on_touch 也在代码里关掉了，
-          避免 media3 自带的三套逻辑各管一头、互相打架。
+          显隐全部交给 media3 自己的开关（在 ViewerActivity 里设）：
+          hide_on_touch=true → 点画面是切换，隐身时点出来、显示时再点立刻收起
+          （方便全屏看）；show_timeout=3s → 显示后 3 秒无操作自动收起；
+          auto_show=false → 免得上/暂停、缓冲时又自己弹出来。
+          点播放键、拖进度条这些触摸会被控制条内部子控件消费，不会触发切换。
         -->
         <androidx.media3.ui.PlayerView
             android:id="@+id/playerView"

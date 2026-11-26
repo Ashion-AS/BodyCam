@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import android.view.MotionEvent
 import android.view.View
 import android.widget.ImageView
 import android.widget.TextView
@@ -66,9 +65,6 @@ class ViewerActivity : Activity() {
 
     /** 解密出的临时明文文件，退出播放页时删掉 */
     private var decryptedTemp: File? = null
-
-    /** 3 秒无操作后收起控制条 */
-    private val hideControlsRunnable = Runnable { playerView.hideController() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -175,24 +171,8 @@ class ViewerActivity : Activity() {
         player?.pause()
     }
 
-    /**
-     * 任何触摸都算「操作」：重新显示控制条并把 3 秒倒计时往后推。
-     *
-     * 放在 Activity 层而不是 PlayerView 的 OnTouchListener 上，是因为
-     * 拖进度条、点播放键这些事件会被控制条内部子 View 消费掉，
-     * 挂在 PlayerView 上收不到；挂在这里才能覆盖"操作中不消失"。
-     */
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        if (ev.actionMasked == MotionEvent.ACTION_DOWN &&
-            playerView.visibility == View.VISIBLE
-        ) {
-            armControls()
-        }
-        return super.dispatchTouchEvent(ev)
-    }
 
     override fun onDestroy() {
-        playerView.removeCallbacks(hideControlsRunnable)
         ToastBar.release(this)
         playerView.player = null
         player?.release()
@@ -277,13 +257,16 @@ class ViewerActivity : Activity() {
         player = exo
         playerView.player = exo
 
-        // 控制条显隐全部自己管。media3 自带的三个开关单独用都会出岔子：
-        // show_timeout=0 → 常驻；hide_on_touch=true → 点一下反而收起；
-        // auto_show → 暂停/缓冲时又自己弹出来且不计时。所以全部关掉，
-        // 只保留 showController()/hideController()，由 armControls() 统一驱动。
+        // 控制条显隐交给 media3 自带机制：
+        // - hide_on_touch=true：点画面就是切换——隐藏时点出来、显示时再点立刻收起
+        //   （正是「方便全屏看」要的行为，也是官方标准做法）；
+        // - show_timeout=3s：显示后 3 秒无操作自动收起；
+        // - auto_show=false：否则暂停/缓冲时会自己弹出来且不计时。
+        // 点按钮、拖进度条这些触摸会被控制条内部子 View 消费，
+        // 不会冒泡到画面的 click，所以操作时不会被收起。
         playerView.setControllerAutoShow(false)
-        playerView.setControllerHideOnTouch(false)
-        playerView.setControllerShowTimeoutMs(0)
+        playerView.setControllerHideOnTouch(true)
+        playerView.setControllerShowTimeoutMs(CONTROLS_TIMEOUT_MS.toInt())
 
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -292,7 +275,7 @@ class ViewerActivity : Activity() {
                 if (playbackState == Player.STATE_READY) {
                     hideLoading()
                     // 等遮罩淡出（150ms）后再显示控制条，否则会在遮罩底下闪一下
-                    playerView.postDelayed({ armControls() }, 250L)
+                    playerView.postDelayed({ playerView.showController() }, 250L)
                 }
             }
 
@@ -357,22 +340,6 @@ class ViewerActivity : Activity() {
      * 不直接 `setVisibility(GONE)` 而是带一层淡出，因为大文件在 `STATE_READY`
      * 边缘上常常还差一帧——硬切会让黑底和首帧闪一下。
      */
-    /**
-     * 显示控制条，并在 3 秒无操作后自动收起。
-     *
-     * 用 Activity 层统一驱动，而不是依赖 media3 的 show_timeout：
-     * - 进入播放时调用一次 → 控制条出现，3 秒后消失（不再常驻）
-     * - 点击画面走 [dispatchTouchEvent] → 再次出现并重新计时（不再"点一下反而收起"）
-     * - 拖进度、点按钮同样会重置计时 → 操作过程中不会突然消失
-     */
-    private fun armControls() {
-        if (playerView.visibility != View.VISIBLE) return
-        if (loadingOverlay.visibility == View.VISIBLE) return
-        playerView.showController()
-        playerView.removeCallbacks(hideControlsRunnable)
-        playerView.postDelayed(hideControlsRunnable, CONTROLS_TIMEOUT_MS)
-    }
-
     private fun hideLoading() {
         if (loadingOverlay.visibility != View.VISIBLE) return
         loadingOverlay.animate()
