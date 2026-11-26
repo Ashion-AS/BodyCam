@@ -71,6 +71,18 @@ public:
     void setPreRecordWindow(ANativeWindow* window);
 
     /**
+     * 预录交接：把当前预录窗口**原地**升级成正式录像的编码目标。
+     *
+     * 不销毁也不重建 EGLSurface —— 中间只要出现「没有编码窗口」的一瞬，
+     * 渲染线程那几帧就不会往编码器画，成片里便是几百毫秒的空洞。
+     * 调用后 `recording_` 变为 true，预录窗口随即失效。
+     *
+     * @return false = 当前没有挂预录窗口（调用方应退回 setPreRecordWindow(null)
+     *         + setEncoderWindow() 的老路径）
+     */
+    bool promotePreRecordToEncoder();
+
+    /**
      * 更新某一块水印：像素为 RGBA_8888 预乘 alpha。
      *
      * @param slot 水印槽号（0~3），四角各一块；同一槽重复调用即覆盖。

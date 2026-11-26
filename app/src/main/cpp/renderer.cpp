@@ -816,6 +816,34 @@ void GlRenderer::setRecording(bool recording) {
     postAndWait([this, recording]() { recording_ = recording; });
 }
 
+bool GlRenderer::promotePreRecordToEncoder() {
+    bool promoted = false;
+    // 同步：返回后归属已经切换完，调用方紧接着才能放心让录制器接管编码器
+    bool posted = postAndWait([this, &promoted]() {
+        if (preRecordSurface_ == EGL_NO_SURFACE) return;
+        // 同一块 EGLSurface 换归属，不销毁不重建：渲染线程下一帧就画到
+        // encoderSurface_ 上，与上一帧完全连续，中途没有「什么都不画」的窗口。
+        if (encoderSurface_ != EGL_NO_SURFACE) {
+            eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            eglDestroySurface(display_, encoderSurface_);
+            encoderSurface_ = EGL_NO_SURFACE;
+        }
+        if (encoderWindow_) {
+            ANativeWindow_release(encoderWindow_);
+            encoderWindow_ = nullptr;
+        }
+        encoderSurface_ = preRecordSurface_;
+        encoderWindow_ = preRecordWindow_;
+        preRecordSurface_ = EGL_NO_SURFACE;
+        preRecordWindow_ = nullptr;
+        // 预录与录像互斥，置位后 renderFrame 只画编码器这一路
+        recording_ = true;
+        promoted = true;
+        LOGI("pre-record promoted to encoder, no gap");
+    });
+    return posted && promoted;
+}
+
 void GlRenderer::onFrameAvailable() {
     {
         std::lock_guard<std::mutex> lk(lock_);

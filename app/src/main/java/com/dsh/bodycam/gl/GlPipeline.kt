@@ -62,6 +62,18 @@ class GlPipeline(val videoWidth: Int, val videoHeight: Int) {
     }
 
     /**
+     * 预录交接：把当前预录窗口原地升级成正式录像的编码目标。
+     *
+     * 不要先 [setPreRecordSurface] 传 null 再 [setEncoderWindow]：中间那一瞬
+     * 渲染线程没有编码目标，几帧画面就不会进编码器，成片里留下一段几百毫秒
+     * 的空洞（实测 366~400ms，播放时表现为「卡一下然后跳过去」）。
+     *
+     * @return false = 当前没有预录窗口，调用方退回「摘窗口 + 装编码窗口」老路径
+     */
+    fun promotePreRecordToEncoder(): Boolean =
+        available && WatermarkEngine.nativePromotePreRecordToEncoder(handle)
+
+    /**
      * 该调用是同步的：返回后渲染线程已经不再往编码器画帧，
      * 可以安全地调用 MediaRecorder.stop()。
      */

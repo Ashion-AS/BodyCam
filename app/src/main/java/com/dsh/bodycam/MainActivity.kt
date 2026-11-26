@@ -1395,8 +1395,12 @@ class MainActivity : Activity(), TriggerRouter.Listener {
 
         // 预录交接：预录开着且缓存正在跑，就把「编码器 + 最近 N 秒帧」一并
         // 交给录制器（成片 = 预录画面 + 实时画面，单个文件）；GL 不换 Surface。
-        // 顺序关键：先同步摘掉 GL 的预录 Surface，渲染线程不再出帧，编码器
-        // 才能安全排空并交接；否则编码器缓冲满会让 GL 渲染线程卡住。
+        //
+        // 这里**不能**先 p.setPreRecordSurface(null)：那会让渲染线程在「摘掉预录
+        // 窗口」到「装上编码窗口」之间没有编码目标，这几十上百毫秒里编码器一帧
+        // 都收不到，成片里就是一段空洞（播放时「卡一下然后跳到后面」）。正确做法
+        // 是让窗口一直挂着，录制器起来后用 promotePreRecordToEncoder() 原地
+        // 把它升级成编码目标（见 GlPipeline）。
         val params = videoParams()
         val handover = preRecordBuffer?.takeIf { it.isRunning }?.let { buf ->
             // 尺寸或编码参数对不上就不能交接：交接的编码器会被录制器直接接管，
@@ -1409,13 +1413,15 @@ class MainActivity : Activity(), TriggerRouter.Listener {
                 buf.release()
                 null
             } else {
-                // 先同步摘掉 GL 的预录 Surface，渲染线程停手后编码器才能安全
-                // 排空并交接（否则编码器缓冲满会把 GL 渲染线程卡住）。
                 // 交接块本身已按 GOP 对齐（见 PreRecordBuffer.trimLocked），
                 // 可独立干净解码，不需要在这里额外逼 IDR。
-                p.setPreRecordSurface(null)
                 buf.beginHandover(SettingsStore.preRecordSeconds(this))
             }
+        }
+        if (handover == null) {
+            // 没交接成（缓存没起量 / 参数不符）：预录窗口已随缓存一起释放，
+            // 必须摘掉，否则渲染线程会往一个失效的 Surface 上画
+            p.setPreRecordSurface(null)
         }
 
         val surface = rec.start(
@@ -1434,11 +1440,21 @@ class MainActivity : Activity(), TriggerRouter.Listener {
         if (surface == null) {
             // 交接出去的编码器归录制器管，失败时得由录制器释放；这里只需提示。
             // 存储不可写导致的启动失败会留 lastCreateFailReason，用它给出准确原因。
+            // 预录窗口此时已随缓存失效，必须摘掉，否则渲染线程会往死 Surface 上画。
+            p.setPreRecordSurface(null)
             toast(getString(storageFailText(rec.lastCreateFailReason, R.string.record_init_failed)))
             return
         }
 
-        p.setEncoderWindow(surface)
+        if (handover != null && p.promotePreRecordToEncoder()) {
+            // 预录窗口原地升级成编码目标：同一块 EGLSurface、每帧照旧画一次，
+            // 交接处一帧都不丢。不要再调 setEncoderWindow()——那会在同一个
+            // Surface 上再建一个 EGLSurface，缓冲翻倍、帧被交替消耗。
+        } else {
+            // 普通录像，或极端情况下预录窗口已不在：走原来的换窗口路径
+            if (handover != null) p.setPreRecordSurface(null)
+            p.setEncoderWindow(surface)
+        }
         // 编码器已在 rec.start() 里启动，这里开始出帧即可
         p.setRecording(true)
         recording = true

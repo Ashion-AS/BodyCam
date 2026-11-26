@@ -61,7 +61,10 @@ class SegmentRecorder(private val context: Context) {
         private const val JOIN_GRACE_MS = 1_000L
 
         /** muxer 就绪前最多缓存多少实时视频帧（约 2 秒 @30fps） */
-        private const val MAX_PENDING_REALTIME_FRAMES = 60
+        private const val MAX_PENDING_REALTIME_FRAMES = 180
+
+    /** 交接块写入期间缓存的实时音频帧上限（每帧几百字节，约 12 秒） */
+    private const val MAX_PENDING_REALTIME_AUDIO_FRAMES = 400
 
         /**
          * muxer 迟迟建不起来就判定为致命失败（毫秒）。
@@ -167,9 +170,34 @@ class SegmentRecorder(private val context: Context) {
      */
     private var audioPtsOffsetUs = -1L
 
-    /** 预录交接的帧，muxer 启动时由 [flushHandoverLocked] 一次性写入 */
+    /**
+     * 预录交接过来时，音频时间轴要继续的起点（原始时基，µs）；-1 = 自己起算。
+     *
+     * 交接把预录的 AudioRecord 与 AAC 编码器整体接了过来，采样计数必须接着数，
+     * 否则要么断一截（空洞）要么比实际短（音画永久漂移）。
+     */
+    private var audioStartUsSeed = -1L
+
+    /** 预录交接的帧，muxer 建好轨后由 [flushHandoverLocked] 一次性写入 */
     private var pendingVideoHandover: List<PreRecordBuffer.Frame>? = null
     private var pendingAudioHandover: List<PreRecordBuffer.Frame>? = null
+
+    /**
+     * true = 交接块还没写完，两条轨的实时帧都只能先缓存。
+     *
+     * 交接块有 5 秒、几 MB，写它要几十上百毫秒（存储慢的机器上更久）。这段时间
+     * 若让编码器停在那里等，输出队列一满 GL 就卡在 eglSwapBuffers 上，相机会
+     * 丢帧，成片里就是交接处那段空洞。所以：视频/音频线程一启动就开始排空、
+     * 帧先进内存，交接块由单独的线程一次写完，写完再按序补上实时帧。
+     */
+    private var handoverPending = false
+
+    /** 交接块写入线程，stop() 时要 join */
+    private var handoverWriterThread: Thread? = null
+
+    /** start() 入口时刻与「首帧视频到达」日志标记，用于量交接耗时 */
+    private var startAtMs = 0L
+    private var firstFrameLogged = false
 
     /**
      * muxer 就绪前到达的实时视频帧。
@@ -180,6 +208,9 @@ class SegmentRecorder(private val context: Context) {
      * 起来后紧跟交接帧顺序写入。
      */
     private val pendingRealtimeVideo = ArrayList<PreRecordBuffer.Frame>()
+
+    /** 交接块写入期间到达的实时音频帧（每帧几百字节，随便存） */
+    private val pendingRealtimeAudio = ArrayDeque<PreRecordBuffer.Frame>()
 
     private var segmentStartPtsUs = 0L
     private var segmentDurationUs = 30 * 60 * 1_000_000L
@@ -231,12 +262,17 @@ class SegmentRecorder(private val context: Context) {
     ): Surface? {
         synchronized(lock) {
             if (started) return null
+            startAtMs = SystemClock.elapsedRealtime()
+            firstFrameLogged = false
             files.clear()
             segmentIndex = 0
             basePtsUs = -1L
             segmentStartPtsUs = 0L
             pendingSwitch = false
             pendingRealtimeVideo.clear()
+            pendingRealtimeAudio.clear()
+            handoverPending = false
+            handoverWriterThread = null
             pendingSinceMs = NO_PENDING
             fatalReported = false
             lastCreateFailReason = null
@@ -254,6 +290,7 @@ class SegmentRecorder(private val context: Context) {
             sessionStartUs = 0L
             videoClockAnchored = false
             audioPtsOffsetUs = -1L
+            audioStartUsSeed = -1L
             nameBase = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             // 预录交接：时间零点取交接视频首帧，成片开头即预录画面。
             // 交接块必须从关键帧起（GOP 对齐），否则解码器从缺参考帧的 P 帧
@@ -272,7 +309,7 @@ class SegmentRecorder(private val context: Context) {
             }
             // 交接块没有关键帧就没法干净解码，宁可整段丢掉走普通起点
             pendingVideoHandover = alignedVideo.takeIf { it.isNotEmpty() }
-            if (alignedVideo.isNotEmpty()) {
+            if (alignedVideo.isNotEmpty() && preHandover != null) {
                 sessionStartUs = alignedVideo.first().ptsUs
                 videoClockAnchored = true
                 basePtsUs = 0L
@@ -285,10 +322,20 @@ class SegmentRecorder(private val context: Context) {
                     audioPtsOffsetUs = offset
                 }
                 val startPts = alignedVideo.first().ptsUs
-                val endPts = alignedVideo.last().ptsUs
+                // 只保留下限：音频尾部允许越过视频末帧一小截。上限卡死会把这
+                // 几帧丢掉，而实时音频是同一编码器紧接着来的，中间就空出 64~128ms。
                 pendingAudioHandover = preHandover?.audioFrames
-                    ?.filter { it.ptsUs - offset in startPts..endPts }
+                    ?.filter { it.ptsUs - offset >= startPts }
                     ?.takeIf { it.isNotEmpty() }
+                // 立刻接管编码器并起排空线程：建 muxer、建轨还要几十毫秒，
+                // 而编码器的输出队列只有几帧余量——晚起线程 → 输出队列满 →
+                // GL 卡在 eglSwapBuffers → 相机丢帧，交接处就是一段空洞。
+                // 此刻 muxer 还没建好，帧先走 onVideoFrameLocked 的缓存分支。
+                videoCodec = preHandover.videoCodec
+                videoFormat = preHandover.videoFormat
+                stopping = false
+                started = true
+                videoThread = thread(name = "bodycam-video-enc") { videoLoop() }
             } else {
                 pendingAudioHandover = null
             }
@@ -300,38 +347,83 @@ class SegmentRecorder(private val context: Context) {
             // 实际 0 文件」的假录（MTK 机型 mkdirs 被 FUSE 拒绝就踩这个）。
             if (!createMuxerLocked()) {
                 // 预录交接路径下编码器已经归本类所有（调用方不会再释放），
-                // 这里必须自己收拾：先接管再 release，否则编码器与会话一起泄漏，
-                // 下次开录会因「编码器已被占用」直接失败。
+                // 这里必须自己收拾：先让排空线程停手，再 release，否则编码器
+                // 与会话一起泄漏，下次开录会因「编码器已被占用」直接失败。
+                stopping = true
+                started = false
+                joinQuietly(videoThread)
+                videoThread = null
                 if (preHandover != null) {
                     videoCodec = preHandover.videoCodec
                     releaseInternal()
                 }
                 return null
             }
+            if (preHandover != null) {
+                Log.i(
+                    TAG,
+                    "muxer created ${SystemClock.elapsedRealtime() - startAtMs}ms after start()"
+                )
+            }
         }
 
         return try {
             val surface: Surface
             if (preHandover != null) {
-                videoCodec = preHandover.videoCodec
-                videoFormat = preHandover.videoFormat
+                // 编码器与排空线程已在上面接管好了（不能等到这里，否则
+                // 建 muxer/建轨这几十毫秒里编码器没人取输出、相机就丢帧）
                 surface = preHandover.videoSurface
-                // 音频用同样配置另起一套；交接的 AAC 帧由音频线程先写进新音轨
-                if (audioEnabled) startAudioCodec()
-                synchronized(lock) { startMuxerIfReadyLocked() }
+                // 音频：把预录那套「AudioRecord + AAC 编码器」整体接过来，
+                // 既不拆也不重建。拆一次重建要 0.4~0.9 秒（最坏实测 15 秒），
+                // 这期间主线程被占着 → 视频编码器没人取输出 → GL 卡在
+                // eglSwapBuffers → 相机丢帧；而音频则整段没采，成片里画面
+                // 和声音各空一截（就是「卡一下然后跳过去」的成因）。
+                val hCodec = preHandover.audioCodec
+                val hRecord = preHandover.audioRecord
+                if (audioEnabled && hCodec != null && hRecord != null) {
+                    audioCodec = hCodec
+                    audioRecord = hRecord
+                    audioFormat = preHandover.audioFormat
+                    audioStartUsSeed = preHandover.audioNextPtsUs
+                    Log.i(
+                        TAG,
+                        "audio capture transferred, timeline continues at " +
+                                "${audioStartUsSeed / 1000}ms"
+                    )
+                } else {
+                    // 预录没带音频，或本次关声音：把移交过来的资源收掉再按需重建
+                    releaseQuietly(hCodec, hRecord)
+                    if (audioEnabled) startAudioCodec()
+                }
+                // 两条轨的格式此刻都齐了。建轨与交接块都交给后台线程：
+                // 视频线程已经在排空，主线程这几十毫秒的 I/O 会把它憋住。
+                synchronized(lock) {
+                    handoverPending = pendingVideoHandover != null
+                }
+                if (handoverPending) {
+                    handoverWriterThread = thread(name = "bodycam-handover") {
+                        writeHandoverBlock()
+                    }
+                } else {
+                    synchronized(lock) { startMuxerIfReadyLocked() }
+                }
             } else {
                 surface = startVideoCodec(width, height, fps, bitrate)
                 if (audioEnabled) startAudioCodec()
+                stopping = false
+                started = true
+                videoThread = thread(name = "bodycam-video-enc") { videoLoop() }
             }
-            stopping = false
-            started = true
-            videoThread = thread(name = "bodycam-video-enc") { videoLoop() }
             if (audioEnabled) {
                 audioThread = thread(name = "bodycam-audio-enc") { audioLoop() }
             }
             surface
         } catch (e: Exception) {
             Log.e(TAG, "start failed", e)
+            // 交接路径下视频线程可能已经起来了：先让它在 stopping 上退出，
+            // 再释放编码器，避免「释放后线程还在 dequeue」的窗口
+            stopping = true
+            started = false
             releaseInternal()
             null
         }
@@ -373,6 +465,9 @@ class SegmentRecorder(private val context: Context) {
         // IllegalStateException。所以 join 必须多留一段余量，超时再补一次中断。
         joinQuietly(videoThread)
         joinQuietly(audioThread)
+        // 交接块写入线程也要等：它还在往 muxer 写，提前 close 会撞上已关闭的通道
+        joinQuietly(handoverWriterThread)
+        handoverWriterThread = null
         videoThread = null
         audioThread = null
 
@@ -415,6 +510,14 @@ class SegmentRecorder(private val context: Context) {
         val (codec, record) = openAudioCapture(context, audioConfigThisRun)
         audioCodec = codec
         audioRecord = record
+    }
+
+    /** 收掉移交过来但本次用不上的音频资源 */
+    private fun releaseQuietly(codec: MediaCodec?, record: AudioRecord?) {
+        runCatching { record?.stop() }
+        runCatching { record?.release() }
+        runCatching { codec?.stop() }
+        runCatching { codec?.release() }
     }
 
     // ---------------------------------------------------------------- 视频线程
@@ -483,22 +586,6 @@ class SegmentRecorder(private val context: Context) {
     }
 
     /**
-     * 把预录交接的视频帧写入当前 muxer（调用方需持有 lock 且已建轨）。
-     * 时间零点 = 交接首帧（sessionStartUs），所以首帧 PTS 恰好为 0。
-     */
-    private fun writeHandoverFramesLocked(frames: List<PreRecordBuffer.Frame>) {
-        val segment = muxer ?: return
-        var n = 0
-        for (f in frames) {
-            val ptsUs = f.ptsUs - sessionStartUs
-            if (ptsUs < 0) continue
-            if (!segment.acceptVideoSample(f.flags)) continue
-            if (segment.writeSample(segment.videoTrack, f.data, ptsUs, f.flags)) n++
-        }
-        Log.i(TAG, "wrote $n handover video frames")
-    }
-
-    /**
      * 补写 muxer 就绪前缓存的实时视频帧（调用方持锁）。
      *
      * 必须紧跟在交接帧之后、任何后续实时帧之前写：这些帧的 PTS 与后继帧连续，
@@ -533,6 +620,24 @@ class SegmentRecorder(private val context: Context) {
         }
     }
 
+    /** 补写交接块写入期间缓存的实时音频帧（调用方持锁） */
+    private fun flushPendingAudioLocked() {
+        if (pendingRealtimeAudio.isEmpty()) return
+        val segment = muxer ?: return
+        var n = 0
+        while (pendingRealtimeAudio.isNotEmpty()) {
+            val f = pendingRealtimeAudio.removeFirst()
+            val ptsUs = f.ptsUs - audioPtsOffsetUs - sessionStartUs
+            if (ptsUs < 0) continue
+            if (segment.writeSample(segment.audioTrack, f.data, ptsUs, f.flags)) {
+                audioSamples++
+                audioBytes += f.data.size
+                n++
+            }
+        }
+        Log.i(TAG, "wrote $n buffered realtime audio frames")
+    }
+
     private fun onVideoFrameLocked(
         buffer: java.nio.ByteBuffer,
         info: MediaCodec.BufferInfo,
@@ -556,6 +661,15 @@ class SegmentRecorder(private val context: Context) {
         }
         val ptsUs = rawPtsUs - sessionStartUs
 
+        if (!firstFrameLogged) {
+            firstFrameLogged = true
+            Log.i(
+                TAG,
+                "first video frame drained ${SystemClock.elapsedRealtime() - startAtMs}ms " +
+                        "after start(), pts=${ptsUs / 1000}ms"
+            )
+        }
+
         if (pendingSwitch && isKey) {
             switchSegmentLocked(ptsUs)
         } else if (!pendingSwitch && muxer != null &&
@@ -573,13 +687,13 @@ class SegmentRecorder(private val context: Context) {
         if (ptsUs < basePtsUs) return
         // switchSegmentLocked 可能刚换过 muxer，这里重新取一次
         val segment = muxer
-        if (segment == null || segment.videoTrack < 0) {
-            // 新段还没建轨（等音频编码器吐格式）：先缓存，别丢帧。
+        if (segment == null || segment.videoTrack < 0 || handoverPending) {
+            // 轨还没建好，或交接块还没写完：先缓存，别丢帧、也别抢在交接块前面写。
             // 丢了成片里就是一段空洞 → 播放到那里花屏/冻结。
             pendingRealtimeVideo.add(
                 PreRecordBuffer.Frame(copyOut(buffer, info), ptsUs, info.flags)
             )
-            // 上限兜底：正常情况下 muxer 一两百毫秒就起来了，缓存不会超过十几帧。
+            // 上限兜底：存储慢的机器上交接块要写几百毫秒，5 秒预录约 150 帧。
             // 万一起不来，也不能无限增长（12Mbps 下每帧约 50KB）。
             while (pendingRealtimeVideo.size > MAX_PENDING_REALTIME_FRAMES) {
                 pendingRealtimeVideo.removeAt(0)
@@ -589,10 +703,13 @@ class SegmentRecorder(private val context: Context) {
             }
             // 超时判据：这么久还建不起 muxer，只能是存储写不进去。
             // 不处理的话会一直缓存-丢弃到用户按停止，最后交出 0 个文件。
-            val now = SystemClock.elapsedRealtime()
-            if (pendingSinceMs == NO_PENDING) pendingSinceMs = now
-            if (now - pendingSinceMs > MUXER_READY_TIMEOUT_MS) {
-                reportFatal(lastCreateFailReason ?: Storage.FailReason.IO_ERROR)
+            // 只判「muxer/轨建不起来」；交接块还在写属于正常耗时，不能当故障。
+            if (segment == null || segment.videoTrack < 0) {
+                val now = SystemClock.elapsedRealtime()
+                if (pendingSinceMs == NO_PENDING) pendingSinceMs = now
+                if (now - pendingSinceMs > MUXER_READY_TIMEOUT_MS) {
+                    reportFatal(lastCreateFailReason ?: Storage.FailReason.IO_ERROR)
+                }
             }
             return
         }
@@ -629,7 +746,9 @@ class SegmentRecorder(private val context: Context) {
         // 预录交接的音频帧由 muxer 启动时统一写入（flushHandoverLocked），
         // 这里不需要额外处理。
         var frames = 0L
-        var audioStartUs = -1L
+        // 交接过来的音频接着预录的时间轴往下走（audioStartUsSeed），
+        // 自己起的采集才用墙钟起算
+        var audioStartUs = audioStartUsSeed
         var lastPtsUs = 0L
         var eosQueued = false
         var stopDeadline = 0L
@@ -715,7 +834,6 @@ class SegmentRecorder(private val context: Context) {
     private fun onAudioFrameLocked(buffer: java.nio.ByteBuffer, info: MediaCodec.BufferInfo) {
         // 视频零点还没定：开头这几十毫秒的音频先丢，等第一帧视频到达
         if (!videoClockAnchored) return
-        val segment = muxer ?: return
 
         val rawPtsUs = info.presentationTimeUs
         if (audioPtsOffsetUs < 0) {
@@ -726,6 +844,18 @@ class SegmentRecorder(private val context: Context) {
         }
         val ptsUs = rawPtsUs - audioPtsOffsetUs - sessionStartUs
         if (ptsUs < 0) return
+        val segment = muxer
+        if (segment == null || segment.audioTrack < 0 || handoverPending) {
+            // 交接块还在写：先缓存（每帧几百字节），等它写完再按序补上，
+            // 否则实时音频会抢在交接音频前面写进音轨，时间轴倒序。
+            pendingRealtimeAudio.addLast(
+                PreRecordBuffer.Frame(copyOut(buffer, info), rawPtsUs, info.flags)
+            )
+            while (pendingRealtimeAudio.size > MAX_PENDING_REALTIME_AUDIO_FRAMES) {
+                pendingRealtimeAudio.removeFirst()
+            }
+            return
+        }
         if (segment.writeSample(segment.audioTrack, buffer, ptsUs, info.offset, info.size, info.flags)) {
             audioSamples++
             audioBytes += info.size
@@ -799,15 +929,18 @@ class SegmentRecorder(private val context: Context) {
         onFatalError?.invoke(reason)
     }
 
-    private fun startMuxerIfReadyLocked() {
-        val segment = muxer ?: return
-        // 视频轨必须有；音频轨只在本次录制带声音时才等
+    /**
+     * 建轨（视频轨必须有，带声音时再加上音频轨）。不写样本，很轻。
+     * @return true = 两条轨都建好了
+     */
+    private fun createTracksLocked(): Boolean {
+        val segment = muxer ?: return false
         val tracksReady = segment.videoTrack >= 0 &&
                 (!audioEnabledThisRun || segment.audioTrack >= 0)
-        if (tracksReady) return
-        val vf = videoFormat ?: return
+        if (tracksReady) return true
+        val vf = videoFormat ?: return false
         // 关掉声音时不需要 audioFormat，否则会被它卡住不建轨
-        val af = if (audioEnabledThisRun) (audioFormat ?: return) else null
+        val af = if (audioEnabledThisRun) (audioFormat ?: return false) else null
         try {
             if (segment.videoTrack < 0) segment.addVideoTrack(vf.toVideoFormat(orientationHint))
             if (audioEnabledThisRun && af != null && segment.audioTrack < 0) {
@@ -815,27 +948,72 @@ class SegmentRecorder(private val context: Context) {
             }
         } catch (e: Exception) {
             Log.e(TAG, "start muxer failed", e)
-            return
+            return false
         }
-        // 轨刚建好：立刻写入预录交接帧，必须排在所有实时帧之前
-        flushHandoverLocked()
+        return segment.videoTrack >= 0 && (!audioEnabledThisRun || segment.audioTrack >= 0)
     }
 
-    /** 写入预录交接的音视频帧（调用方持锁且已建轨） */
-    private fun flushHandoverLocked() {
-        pendingVideoHandover?.let { frames ->
-            writeHandoverFramesLocked(frames)
-            pendingVideoHandover = null
-        }
-        // 本次录制不带声音时不写交接的 AAC 帧：预录可能是在「声音开」时启动的，
-        // 它的 Handover 里会带着音频帧，而此时根本没有音轨（track = -1）
-        pendingAudioHandover?.let { frames ->
-            if (audioEnabledThisRun) writeHandoverAudioLocked(frames)
-            pendingAudioHandover = null
-        }
-        // 交接帧之后立刻补就绪前缓存的实时帧。普通录像没有交接帧，
-        // 走预录关闭分支也必须刷，否则成片开头会缺 0.25~1 秒画面。
+    private fun startMuxerIfReadyLocked() {
+        if (!createTracksLocked()) return
+        // 交接块还没写完：由 bodycam-handover 线程写完后统一补，别在这里抢先写
+        if (handoverPending) return
+        // 没有交接块（普通录像，或交接块已写完）：把就绪前缓存的实时帧补上
         flushPendingRealtimeLocked()
+        flushPendingAudioLocked()
+    }
+
+    /**
+     * 把一个交接块（最多 N 秒、几 MB）写进 muxer。
+     *
+     * **刻意不持锁**：这期间视频/音频线程只把实时帧往内存里缓存、不碰 muxer，
+     * muxer 归本线程独占。若全程持锁，就轮到两个采集线程被卡住——编码器输出
+     * 队列一满，GL 卡在 eglSwapBuffers 上、相机丢帧，交接处照样空一段
+     * （实测持锁写法会空出 100ms，不持锁则一帧不缺）。
+     *
+     * 写完后短暂上锁：清标志并按序补写缓存下来的实时帧。
+     */
+    private fun writeHandoverBlock() {
+        val video: List<PreRecordBuffer.Frame>?
+        val audio: List<PreRecordBuffer.Frame>?
+        val segment: Fmp4Segment?
+        synchronized(lock) {
+            video = pendingVideoHandover
+            audio = pendingAudioHandover
+            pendingVideoHandover = null
+            pendingAudioHandover = null
+            // 建轨也放在这个线程：media3 建轨要写一次 moov，在 FUSE 上是几十毫秒。
+            // 放在主线程（start() 里）会把视频线程那口气憋住，编码器再次反压。
+            createTracksLocked()
+            segment = muxer
+        }
+        if (segment == null || segment.videoTrack < 0) {
+            synchronized(lock) { handoverPending = false }
+            return
+        }
+        val t0 = SystemClock.elapsedRealtime()
+        var n = 0
+        try {
+            if (video != null) {
+                for (f in video) {
+                    val ptsUs = f.ptsUs - sessionStartUs
+                    if (ptsUs < 0) continue
+                    if (!segment.acceptVideoSample(f.flags)) continue
+                    if (segment.writeSample(segment.videoTrack, f.data, ptsUs, f.flags)) n++
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "write handover video block failed", e)
+        }
+        Log.i(
+            TAG,
+            "wrote $n handover video frames in ${SystemClock.elapsedRealtime() - t0}ms"
+        )
+        synchronized(lock) {
+            if (audio != null && audioEnabledThisRun) writeHandoverAudioLocked(audio)
+            handoverPending = false
+            flushPendingRealtimeLocked()
+            flushPendingAudioLocked()
+        }
     }
 
     private fun switchSegmentLocked(nextPtsUs: Long) {

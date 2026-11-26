@@ -194,6 +194,16 @@ internal const val US_PER_SECOND = 1_000_000L
 /** 每次从 AudioRecord 读多少 PCM 字节 */
 internal const val PCM_BUFFER_SIZE = 8_192
 
+/**
+ * 预录音频线程的读取块大小。
+ *
+ * `AudioRecord.read()` 会一直阻塞到凑满请求的字节数：8192 字节在 48kHz 单声道下
+ * 是 85ms，而预录交接要 join 这个线程——它若正卡在读里，join 就得等最多 85ms
+ * （实测 152ms）。这段时间视频编码器没人取输出，GL 被反压、相机丢帧，成片里
+ * 就是交接处那段空洞。2048 字节 = 21ms，正好也够一个 AAC 帧，join 一下就回来。
+ */
+internal const val PCM_CHUNK_SIZE = 2_048
+
 /** 编码器输入缓冲上限（AAC 一帧远小于此） */
 internal const val MAX_INPUT_SIZE = 16 * 1024
 

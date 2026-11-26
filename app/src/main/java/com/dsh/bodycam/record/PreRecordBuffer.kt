@@ -58,10 +58,25 @@ class PreRecordBuffer(private val context: Context) {
          */
         val audioFrames: List<Frame>,
         /**
+         * 预录阶段一直在跑的 AAC 编码器，**整体移交给录制器继续用**（可能为 null）。
+         *
+         * 不重建：拆掉再建要几百毫秒（实测 0.4~0.9 秒，最坏一次 15 秒），
+         * 这期间既没有音频采集（音轨出现无声空洞），又占着主线程，
+         * 视频编码器没人取输出、GL 卡在 eglSwapBuffers 上、相机丢帧
+         * （画面出现几百毫秒空洞）。移交后音频流在编码器层面就是连续的。
+         */
+        val audioCodec: MediaCodec?,
+        /** 预录阶段一直在采的 AudioRecord，同样整体移交，采集一刻不停（可能为 null） */
+        val audioRecord: AudioRecord?,
+        /** 预录编码器已经吐出的音轨格式；有它录制器就不必等新编码器出格式 */
+        val audioFormat: MediaFormat?,
+        /** 移交后下一帧音频该用的 PTS（沿用预录的采样计数，保证时间轴连续） */
+        val audioNextPtsUs: Long,
+        /**
          * 音频相对视频的固定时基差（µs，= 音频 PTS − 视频 PTS）。
          *
          * 两条流的时钟未必同源（音频 PTS 由 `elapsedRealtimeNanos()` 生成，
-         * 相机 PTS 在 MTK 上走 CLOCK_MONOTONIC），交接时用两队尾帧配对求出。
+         * 相机 PTS 在 MTK 上走 CLOCK_MONOTONIC），交接时由 [Timebase] 判定。
          * 录制器把这批音频平移回视频时基后再写盘。
          */
         val audioPtsOffsetUs: Long
@@ -80,6 +95,18 @@ class PreRecordBuffer(private val context: Context) {
     private var audioThread: Thread? = null
     private var audioFormat: MediaFormat? = null
     private val audioQueue = ArrayDeque<Frame>()
+
+    /**
+     * 音频时间轴的起点（µs，原始时基）与已送进编码器的采样帧数。
+     *
+     * 交接后由录制器接着数：PTS 必须沿同一条曲线往下走，否则音频要么断一截
+     * （空洞），要么比实际短（音画永久漂移）。
+     */
+    @Volatile
+    private var audioStartUs = -1L
+
+    @Volatile
+    private var audioFramesFed = 0L
 
     @Volatile
     private var capturing = false
@@ -173,6 +200,8 @@ class PreRecordBuffer(private val context: Context) {
             audioQueue.clear()
             videoFormat = null
             audioFormat = null
+            audioStartUs = -1L
+            audioFramesFed = 0L
             stopping = false
             handoverMode = false
         }
@@ -264,12 +293,18 @@ class PreRecordBuffer(private val context: Context) {
                 )
             }
             val aFrames = audioQueue.filter {
-                it.ptsUs - audioPtsOffsetUs in startPts..endPts
+                it.ptsUs - audioPtsOffsetUs >= startPts
             }
 
-            // 音频编码器与 AudioRecord 不交接（交接间隙会溢出），这里释放掉，
-            // 录制器用同样配置另起一套，并把 aFrames 先写进新音轨。
-            releaseAudioInternal()
+            // 音频采集与编码器**整体移交**，不在这里拆。
+            // 拆掉重建要几百毫秒（实测 0.4~0.9s，最坏一次 15s）：这段时间主线程
+            // 被占着，视频编码器没人取输出 → GL 卡在 eglSwapBuffers → 相机丢帧，
+            // 画面就是交接处那 400ms 的空洞；音频更是整段没采，出现近 1 秒无声。
+            // 移交后：AudioRecord 一直在采，编码器一直在编，时间轴天然连续。
+            val adoptedCodec = audioCodec
+            val adoptedRecord = audioRecord
+            val adoptedFormat = audioFormat
+            val nextAudioPts = audioNextPtsLocked()
 
             val h = Handover(
                 videoCodec = vc,
@@ -277,11 +312,18 @@ class PreRecordBuffer(private val context: Context) {
                 videoFormat = vf,
                 videoFrames = vFrames,
                 audioFrames = aFrames,
+                audioCodec = adoptedCodec,
+                audioRecord = adoptedRecord,
+                audioFormat = adoptedFormat,
+                audioNextPtsUs = nextAudioPts,
                 audioPtsOffsetUs = audioPtsOffsetUs
             )
-            // 视频所有权已转移，本对象不再持有
+            // 视频与音频的所有权都已转移，本对象不再持有（release() 不会再碰它们）
             videoCodec = null
             videoSurface = null
+            audioCodec = null
+            audioRecord = null
+            audioFormat = null
             videoQueue.clear()
             audioQueue.clear()
             stopping = false
@@ -289,7 +331,8 @@ class PreRecordBuffer(private val context: Context) {
             Log.i(
                 TAG,
                 "handover ${vFrames.size} video / ${aFrames.size} audio frames " +
-                        "(${bufferSeconds}s window, audio offset ${audioPtsOffsetUs / 1000}ms)"
+                        "(${bufferSeconds}s window, audio offset ${audioPtsOffsetUs / 1000}ms, " +
+                        "audio ${if (adoptedCodec != null) "transferred" else "not available"})"
             )
             return h
         }
@@ -354,6 +397,11 @@ class PreRecordBuffer(private val context: Context) {
         val info = MediaCodec.BufferInfo()
         var idleRounds = 0
         while (true) {
+            // 交接时立刻停手：编码器里还没取走的帧留给录制器的新线程去取，
+            // 交接才不会丢帧。不能像普通停止那样等「连续若干轮拿不到输出」——
+            // 交接期间 GL 仍在往这个 Surface 出帧，那个条件永远不成立，
+            // join 必然超时，最后变成两个线程同时操作同一个编码器。
+            if (stopping && handoverMode) break
             val index = try {
                 c.dequeueOutputBuffer(info, DRAIN_TIMEOUT_US)
             } catch (e: Exception) {
@@ -398,36 +446,46 @@ class PreRecordBuffer(private val context: Context) {
     private fun audioLoop() {
         val record = audioRecord ?: return
         val codec = audioCodec ?: return
-        val pcm = ByteArray(PCM_BUFFER_SIZE)
+        val pcm = ByteArray(PCM_CHUNK_SIZE)
         val info = MediaCodec.BufferInfo()
-        var frames = 0L
-        var startUs = -1L
         var eosQueued = false
-        var idleRounds = 0
 
         while (true) {
             if (stopping) {
-                // 交接时不给编码器发 EOS（编码器要交给录制器继续用）；
-                // 录制器 stop 时才发。这里只把已采到的音频排空即可。
-                if (!handoverMode && !eosQueued) {
-                    eosQueued = queueEos(codec, SystemClock.elapsedRealtimeNanos() / 1000)
+                // 交接：立刻停手，剩下的采集全在 AudioRecord 的缓冲里，
+                // 由录制器接着读，一帧都丢不了。这里绝不能发 EOS——编码器
+                // 要原样移交给录制器继续用。
+                if (handoverMode) break
+                if (!eosQueued) {
+                    eosQueued = queueEos(codec, audioNextPtsLocked())
                 }
             } else {
+                // 非阻塞读：阻塞读会一直等到凑满一整块（8192 字节 = 85ms），
+                // 而交接时要 join 这个线程，它卡在读里 join 就得等 85ms——
+                // 那段时间视频编码器没人取输出，GL 反压、相机丢帧。非阻塞 + 5ms
+                // 轮询后，stopping 最多 5ms 就被看到，采集数据仍在 AudioRecord
+                // 缓冲里，一帧都不会丢。
                 val read = try {
-                    record.read(pcm, 0, pcm.size)
+                    record.read(pcm, 0, pcm.size, AudioRecord.READ_NON_BLOCKING)
                 } catch (e: Exception) {
                     -1
                 }
                 if (read > 0) {
-                    if (startUs < 0) {
-                        // 音频 PTS 用 CLOCK_BOOTTIME 绝对时基，与视频帧
-                        // （相机 SurfaceTexture 时间戳）同源，交接后可直接对齐
-                        startUs = SystemClock.elapsedRealtimeNanos() / 1000
+                    if (audioStartUs < 0) {
+                        // 音频 PTS 用 CLOCK_BOOTTIME 绝对时基，交接后由
+                        // Timebase 判定与视频时钟的差再平移对齐
+                        audioStartUs = SystemClock.elapsedRealtimeNanos() / 1000
                     }
                     val cfg = startedAudioConfig
-                    val ptsUs = startUs + frames * US_PER_SECOND / cfg.sampleRate
-                    frames += read.toLong() / cfg.pcmBytesPerFrame
+                    val ptsUs = audioStartUs + audioFramesFed * US_PER_SECOND / cfg.sampleRate
+                    audioFramesFed += read.toLong() / cfg.pcmBytesPerFrame
                     feedAudio(codec, pcm, read, ptsUs, cfg)
+                } else {
+                    try {
+                        Thread.sleep(STOP_POLL_MS)
+                    } catch (e: InterruptedException) {
+                        break
+                    }
                 }
             }
 
@@ -465,10 +523,6 @@ class PreRecordBuffer(private val context: Context) {
             }
             if (eos) break
             if (stopping) {
-                if (handoverMode) {
-                    // 没有 EOS 可等，连续几轮拿不到输出就认为排空完成
-                    if (++idleRounds > 10) break
-                }
                 try {
                     Thread.sleep(STOP_POLL_MS)
                 } catch (e: InterruptedException) {
@@ -532,6 +586,16 @@ class PreRecordBuffer(private val context: Context) {
         for (f in videoQueue) if (f.ptsUs > maxPts) maxPts = f.ptsUs
         return maxPts
     }
+
+    /**
+     * 交接后下一帧音频该用的 PTS（原始时基）。
+     *
+     * 沿用「起点 + 已送采样数」的同一条曲线，录制器接手后时间轴才严密连续；
+     * 不要用墙钟重新起算——那会让交接处凭空多出一段空洞或让音轨变短。
+     */
+    private fun audioNextPtsLocked(): Long =
+        if (audioStartUs < 0) 0L
+        else audioStartUs + audioFramesFed * US_PER_SECOND / startedAudioConfig.sampleRate
 
     /**
      * 取最近 keepSeconds 秒的帧，起点落在**关键帧**上。

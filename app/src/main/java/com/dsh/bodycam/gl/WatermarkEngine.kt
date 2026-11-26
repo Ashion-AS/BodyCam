@@ -24,6 +24,7 @@ object WatermarkEngine {
     external fun nativeSetEncoderWindow(handle: Long, surface: Surface): Boolean
     external fun nativeClearEncoderWindow(handle: Long)
     external fun nativeSetPreRecordSurface(handle: Long, surface: Surface?)
+    external fun nativePromotePreRecordToEncoder(handle: Long): Boolean
     external fun nativeSetRecording(handle: Long, recording: Boolean)
     external fun nativeSetWatermark(
         handle: Long,
