@@ -26,8 +26,10 @@ import com.dsh.bodycam.core.AppConfig
  * **一个文件**，开头就是按下录像键之前的画面与声音，交接瞬间不丢帧。
  *
  * 时间基：视频帧 PTS 来自相机 SurfaceTexture 时间戳，音频 PTS 用
- * `elapsedRealtimeNanos()/1000` 起算；两者都是 CLOCK_BOOTTIME 微秒，
- * 交接后可直接相减对齐。
+ * `elapsedRealtimeNanos()/1000` 起算。**两者未必同源**——相机可能走
+ * CLOCK_MONOTONIC（MTK），而 elapsedRealtime 是 CLOCK_BOOTTIME，设备休眠过
+ * 就会差出一个休眠时长。交接时由 [Timebase] 判定相机时钟并算出
+ * `audioPtsOffsetUs`，录制器把音频平移回视频时基，任何地方都不再假设可直接相减。
  *
  * 线程模型：视频线程只碰视频编码器，音频线程只碰音频编码器 + AudioRecord；
  * 交接时先各自 join，再移交视频编码器，音频编码器另行释放（录制器重起）。
@@ -54,7 +56,15 @@ class PreRecordBuffer(private val context: Context) {
          * 音轨，再接着写实时音频——避免交接期间 AudioRecord 缓冲溢出导致
          * 音画永久漂移。
          */
-        val audioFrames: List<Frame>
+        val audioFrames: List<Frame>,
+        /**
+         * 音频相对视频的固定时基差（µs，= 音频 PTS − 视频 PTS）。
+         *
+         * 两条流的时钟未必同源（音频 PTS 由 `elapsedRealtimeNanos()` 生成，
+         * 相机 PTS 在 MTK 上走 CLOCK_MONOTONIC），交接时用两队尾帧配对求出。
+         * 录制器把这批音频平移回视频时基后再写盘。
+         */
+        val audioPtsOffsetUs: Long
     )
 
     private val lock = Object()
@@ -235,9 +245,27 @@ class PreRecordBuffer(private val context: Context) {
             val vFrames = keyAlignedTailLocked(keepSeconds)
             // 音频裁到视频区间之内：不能短于视频起点，也不能越过视频末帧，
             // 否则音轨会伸进交接空档，播放器在空档处等待画面 → 卡顿/花屏。
+            //
+            // 裁剪前必须先算出两条时钟的差：音频 PTS 走 elapsedRealtime（BOOTTIME），
+            // 相机在 MTK 上走 MONOTONIC，休眠过就差一个休眠时长，不做平移的话
+            // 区间裁剪一帧都留不下。
+            //
+            // 用「时钟判定」而不是「两队尾帧相减」：交接时两个线程的停止时刻并不同步，
+            // 尾帧能差出几百毫秒（实测 428ms），那点误差会直接变成音画不同步。
             val startPts = vFrames.firstOrNull()?.ptsUs ?: 0L
             val endPts = vFrames.lastOrNull()?.ptsUs ?: 0L
-            val aFrames = audioQueue.filter { it.ptsUs >= startPts && it.ptsUs <= endPts }
+            val timebase = vFrames.lastOrNull()?.let { Timebase.detect(it.ptsUs) }
+            val audioPtsOffsetUs = timebase?.audioOffsetUs ?: 0L
+            if (timebase != null) {
+                Log.i(
+                    TAG,
+                    "timebase: camera=${timebase.cameraClock}, sleep=${timebase.sleepUs / 1000}ms, " +
+                            "audio offset=${audioPtsOffsetUs / 1000}ms"
+                )
+            }
+            val aFrames = audioQueue.filter {
+                it.ptsUs - audioPtsOffsetUs in startPts..endPts
+            }
 
             // 音频编码器与 AudioRecord 不交接（交接间隙会溢出），这里释放掉，
             // 录制器用同样配置另起一套，并把 aFrames 先写进新音轨。
@@ -248,7 +276,8 @@ class PreRecordBuffer(private val context: Context) {
                 videoSurface = videoSurface ?: vc.createInputSurface(),
                 videoFormat = vf,
                 videoFrames = vFrames,
-                audioFrames = aFrames
+                audioFrames = aFrames,
+                audioPtsOffsetUs = audioPtsOffsetUs
             )
             // 视频所有权已转移，本对象不再持有
             videoCodec = null
@@ -260,7 +289,7 @@ class PreRecordBuffer(private val context: Context) {
             Log.i(
                 TAG,
                 "handover ${vFrames.size} video / ${aFrames.size} audio frames " +
-                        "(${bufferSeconds}s window)"
+                        "(${bufferSeconds}s window, audio offset ${audioPtsOffsetUs / 1000}ms)"
             )
             return h
         }

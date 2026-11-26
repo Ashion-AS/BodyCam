@@ -38,10 +38,13 @@ import kotlin.concurrent.thread
  *   audio 线程：AudioRecord → 编码器 → 写 muxer
  *   两个线程共用一把锁保护 muxer，切换文件时互斥。
  *
- * 时间戳：统一成「相对本次录制开始」的微秒。
- *   视频：SurfaceTexture 时间戳(ns) / 1000 - sessionStartUs
- *   音频：首个采样时刻 + 累计帧数换算
- * 两条轨同源，A/V 不会漂。
+ * 时间戳：统一成「相对本次录制零点」的微秒。
+ *   视频：相机 PTS − 首帧视频 PTS（零点由第一帧视频自己锚定）
+ *   音频：首个采样时刻 + 累计帧数换算，再减去「音频-视频时基差」
+ *
+ * **不要假设两条轨同源**：相机 PTS 可能是 CLOCK_MONOTONIC（MTK），音频 PTS 走
+ * `elapsedRealtimeNanos()`（CLOCK_BOOTTIME）。设备休眠过就相差一个休眠时长，
+ * 所以音频时基差在运行时实测（见 [audioPtsOffsetUs]），而不是靠时钟假设。
  *
  * 预录交接：`start(preHandover = ...)` 时接管预录的视频编码器，并把预录阶段
  * 已编码的音视频帧在 muxer 启动瞬间（[flushHandoverLocked]）一次性写入，
@@ -145,6 +148,25 @@ class SegmentRecorder(private val context: Context) {
     private var sessionStartUs = 0L
     private var basePtsUs = -1L
 
+    /**
+     * 视频时间轴是否已锚定。
+     *
+     * 零点不能取墙钟：相机帧时间戳的时基各平台不一致——Pixel 走
+     * CLOCK_BOOTTIME（含休眠），MTK 的 DSJ-D100 走 CLOCK_MONOTONIC（不含休眠）。
+     * 只要设备休眠过，两者就差出休眠总时长，拿 elapsedRealtime 当零点会把
+     * 所有视频帧算成负 PTS 全部丢掉。所以零点一律取「第一条要写入的视频帧」。
+     */
+    private var videoClockAnchored = false
+
+    /**
+     * 音频相对视频的固定时基差（µs，= 音频 PTS − 视频 PTS），-1 = 尚未测出。
+     *
+     * 音频 PTS 由本类用 `elapsedRealtimeNanos()` 生成（BOOTTIME），视频 PTS 来自
+     * 相机（MTK 上是 MONOTONIC）。首帧视频到达时用 [Timebase.detect] 判定并算出差值，
+     * 之后所有音频都按这个偏移平移；交接带来的音频沿用预录侧测好的同一个值。
+     */
+    private var audioPtsOffsetUs = -1L
+
     /** 预录交接的帧，muxer 启动时由 [flushHandoverLocked] 一次性写入 */
     private var pendingVideoHandover: List<PreRecordBuffer.Frame>? = null
     private var pendingAudioHandover: List<PreRecordBuffer.Frame>? = null
@@ -226,10 +248,12 @@ class SegmentRecorder(private val context: Context) {
             videoCodecTypeThisRun = codecType
             segmentDurationUs = segmentSeconds.coerceAtLeast(1) * US_PER_SECOND
             orientationHint = orientation
-            // 必须用 CLOCK_BOOTTIME：相机帧时间戳（SENSOR_TIMESTAMP）就是这个时基。
-            // 用 System.nanoTime()（CLOCK_MONOTONIC）的话，机器休眠过后两者会差出
-            // 休眠总时长，音频 PTS 会全部小于视频基准，被当成「早于起点」全部丢弃。
-            sessionStartUs = SystemClock.elapsedRealtimeNanos() / 1000
+            // 视频零点等第一帧视频到达时再定（普通录像），或者用交接首帧（预录）。
+            // 不能在这里取墙钟：相机时间戳的时基可能是 MONOTONIC 也可能是
+            // BOOTTIME，两者差一个休眠时长，用墙钟当基准会整段丢弃。
+            sessionStartUs = 0L
+            videoClockAnchored = false
+            audioPtsOffsetUs = -1L
             nameBase = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             // 预录交接：时间零点取交接视频首帧，成片开头即预录画面。
             // 交接块必须从关键帧起（GOP 对齐），否则解码器从缺参考帧的 P 帧
@@ -250,13 +274,20 @@ class SegmentRecorder(private val context: Context) {
             pendingVideoHandover = alignedVideo.takeIf { it.isNotEmpty() }
             if (alignedVideo.isNotEmpty()) {
                 sessionStartUs = alignedVideo.first().ptsUs
+                videoClockAnchored = true
                 basePtsUs = 0L
                 segmentStartPtsUs = 0L
-                // 音频只能落在交接视频的时间范围内，否则音轨会伸进交接空档
+                // 交接带来的音频帧还在音频自己的时钟上，先用「音频队列尾 − 视频队列尾」
+                // 测出的时基差平移，再按视频区间裁剪；否则 MTK 上会一帧都裁不出来
+                // （音频 PTS 比视频大一个休眠时长，全部落在区间之外）。
+                val offset = preHandover?.audioPtsOffsetUs ?: 0L
+                if (!preHandover?.audioFrames.isNullOrEmpty()) {
+                    audioPtsOffsetUs = offset
+                }
                 val startPts = alignedVideo.first().ptsUs
                 val endPts = alignedVideo.last().ptsUs
                 pendingAudioHandover = preHandover?.audioFrames
-                    ?.filter { it.ptsUs in startPts..endPts }
+                    ?.filter { it.ptsUs - offset in startPts..endPts }
                     ?.takeIf { it.isNotEmpty() }
             } else {
                 pendingAudioHandover = null
@@ -421,23 +452,23 @@ class SegmentRecorder(private val context: Context) {
             val eos = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
 
             if (!isConfig && info.size > 0) {
-                val ptsUs = info.presentationTimeUs - sessionStartUs
-                // 预录交接场景：sessionStartUs 已回退到交接首帧，实时帧的
-                // ptsUs 必然 ≥ 0 且衔接在交接帧之后（同一编码器同一时基）
-                if (ptsUs >= 0) {
-                    // getOutputBuffer 在编码器已被 stop()/release() 后调用会抛
-                    // IllegalStateException。stop() 里 join 有超时，超时后主线程
-                    // 仍会释放编码器，而本线程可能刚 dequeue 到索引还没取缓冲——
-                    // 这个窗口必然存在，所以取缓冲必须自己兜住异常直接退出循环，
-                    // 不能让它冒到线程顶层变成 FATAL。
-                    val buffer = try {
-                        codec.getOutputBuffer(index)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "video getOutputBuffer, codec released", e)
-                        break
-                    }
-                    if (buffer != null) {
-                        synchronized(lock) { onVideoFrameLocked(buffer, info, ptsUs, isKey) }
+                // 这里不再有「负 PTS 直接丢弃」：零点由第一帧视频自己锚定
+                // （见 onVideoFrameLocked），相机时间戳是哪种时钟都不影响。
+                //
+                // getOutputBuffer 在编码器已被 stop()/release() 后调用会抛
+                // IllegalStateException。stop() 里 join 有超时，超时后主线程
+                // 仍会释放编码器，而本线程可能刚 dequeue 到索引还没取缓冲——
+                // 这个窗口必然存在，所以取缓冲必须自己兜住异常直接退出循环，
+                // 不能让它冒到线程顶层变成 FATAL。
+                val buffer = try {
+                    codec.getOutputBuffer(index)
+                } catch (e: Exception) {
+                    Log.w(TAG, "video getOutputBuffer, codec released", e)
+                    break
+                }
+                if (buffer != null) {
+                    synchronized(lock) {
+                        onVideoFrameLocked(buffer, info, info.presentationTimeUs, isKey)
                     }
                 }
             }
@@ -491,8 +522,9 @@ class SegmentRecorder(private val context: Context) {
     /** 预录交接的音频帧（在音频线程里、建轨后写入） */
     private fun writeHandoverAudioLocked(frames: List<PreRecordBuffer.Frame>) {
         val segment = muxer ?: return
+        if (audioPtsOffsetUs < 0) return
         for (f in frames) {
-            val ptsUs = f.ptsUs - sessionStartUs
+            val ptsUs = f.ptsUs - audioPtsOffsetUs - sessionStartUs
             if (ptsUs < 0) continue
             if (segment.writeSample(segment.audioTrack, f.data, ptsUs, f.flags)) {
                 audioSamples++
@@ -504,9 +536,26 @@ class SegmentRecorder(private val context: Context) {
     private fun onVideoFrameLocked(
         buffer: java.nio.ByteBuffer,
         info: MediaCodec.BufferInfo,
-        ptsUs: Long,
+        rawPtsUs: Long,
         isKey: Boolean
     ) {
+        // 第一帧视频即时间零点。相机 PTS 走 MONOTONIC 还是 BOOTTIME 都无所谓，
+        // 因为这里不做任何跨时钟运算。
+        if (!videoClockAnchored) {
+            sessionStartUs = rawPtsUs
+            videoClockAnchored = true
+            // 顺手判定视频时间戳的时基：音频（BOOTTIME）要按这个差值平移，
+            // 否则在休眠过的设备上会整体错开几百秒。
+            val base = Timebase.detect(rawPtsUs)
+            audioPtsOffsetUs = base.audioOffsetUs
+            Log.i(
+                TAG,
+                "video clock anchored at ${rawPtsUs / 1000}ms, camera=${base.cameraClock}, " +
+                        "sleep=${base.sleepUs / 1000}ms -> audio offset=${audioPtsOffsetUs / 1000}ms"
+            )
+        }
+        val ptsUs = rawPtsUs - sessionStartUs
+
         if (pendingSwitch && isKey) {
             switchSegmentLocked(ptsUs)
         } else if (!pendingSwitch && muxer != null &&
@@ -600,8 +649,9 @@ class SegmentRecorder(private val context: Context) {
                         // audioStartUs 接管，不会走到这里。
                         audioStartUs = SystemClock.elapsedRealtimeNanos() / 1000
                     }
-                    // 送进编码器的 PTS 始终用绝对时基，和视频（相机时间戳）
-                    // 同源；输出端再统一减 sessionStartUs 换成成片时间轴。
+                    // 送进编码器的 PTS 用本类自己的时钟（elapsedRealtime，BOOTTIME）。
+                    // 它和视频（相机时间戳）不一定同源，输出端由 audioPtsOffsetUs
+                    // 平移回视频时基，不能直接与视频 PTS 相减。
                     val cfg = audioConfigThisRun
                     val ptsUs = audioStartUs + frames * US_PER_SECOND / cfg.sampleRate
                     frames += read.toLong() / cfg.pcmBytesPerFrame
@@ -663,13 +713,18 @@ class SegmentRecorder(private val context: Context) {
     }
 
     private fun onAudioFrameLocked(buffer: java.nio.ByteBuffer, info: MediaCodec.BufferInfo) {
-        // basePtsUs 是视频零点（普通录像时为第一条视频帧 PTS；预录交接时为 0）。
-        // 编码器输出的 PTS 是绝对时基（与视频同源），减 sessionStartUs 换成
-        // 成片相对时间轴，再减 basePtsUs 对齐视频起点。
+        // 视频零点还没定：开头这几十毫秒的音频先丢，等第一帧视频到达
+        if (!videoClockAnchored) return
         val segment = muxer ?: return
-        if (basePtsUs < 0) return
 
-        val ptsUs = info.presentationTimeUs - sessionStartUs - basePtsUs
+        val rawPtsUs = info.presentationTimeUs
+        if (audioPtsOffsetUs < 0) {
+            // 走到这里说明视频侧还没锚定过（正常不会发生：音频要先等零点），
+            // 用音频自己的时钟判一次，至少保证不把音频排到几百秒之后
+            audioPtsOffsetUs = Timebase.detect(rawPtsUs).audioOffsetUs
+            Log.i(TAG, "audio pts offset ${audioPtsOffsetUs / 1000}ms (measured on audio frame)")
+        }
+        val ptsUs = rawPtsUs - audioPtsOffsetUs - sessionStartUs
         if (ptsUs < 0) return
         if (segment.writeSample(segment.audioTrack, buffer, ptsUs, info.offset, info.size, info.flags)) {
             audioSamples++
