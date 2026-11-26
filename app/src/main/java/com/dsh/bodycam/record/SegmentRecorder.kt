@@ -314,13 +314,17 @@ class SegmentRecorder(private val context: Context) {
                 videoClockAnchored = true
                 basePtsUs = 0L
                 segmentStartPtsUs = 0L
-                // 交接带来的音频帧还在音频自己的时钟上，先用「音频队列尾 − 视频队列尾」
-                // 测出的时基差平移，再按视频区间裁剪；否则 MTK 上会一帧都裁不出来
+                // 交接带来的音频帧还在音频自己的时钟上，用预录侧按视频尾帧判定的
+                // 时基差平移，再按视频区间裁剪；否则 MTK 上会一帧都裁不出来
                 // （音频 PTS 比视频大一个休眠时长，全部落在区间之外）。
-                val offset = preHandover?.audioPtsOffsetUs ?: 0L
-                if (!preHandover?.audioFrames.isNullOrEmpty()) {
-                    audioPtsOffsetUs = offset
-                }
+                //
+                // **无条件赋值**（不能只在这批音频帧非空时赋值）：预录音频队列
+                // 恰好为空的场合，偏移会停留在 -1，后面就只能拿音频帧去猜时钟；
+                // 而音频恒为 BOOTTIME，猜出来必然是「不用平移」——MTK 上又会
+                // 把声音整体排到几百秒之后。这个值只取决于视频时钟，与有没有
+                // 音频帧无关。
+                audioPtsOffsetUs = preHandover.audioPtsOffsetUs
+                val offset = preHandover.audioPtsOffsetUs
                 val startPts = alignedVideo.first().ptsUs
                 // 只保留下限：音频尾部允许越过视频末帧一小截。上限卡死会把这
                 // 几帧丢掉，而实时音频是同一编码器紧接着来的，中间就空出 64~128ms。
@@ -837,10 +841,15 @@ class SegmentRecorder(private val context: Context) {
 
         val rawPtsUs = info.presentationTimeUs
         if (audioPtsOffsetUs < 0) {
-            // 走到这里说明视频侧还没锚定过（正常不会发生：音频要先等零点），
-            // 用音频自己的时钟判一次，至少保证不把音频排到几百秒之后
-            audioPtsOffsetUs = Timebase.detect(rawPtsUs).audioOffsetUs
-            Log.i(TAG, "audio pts offset ${audioPtsOffsetUs / 1000}ms (measured on audio frame)")
+            // 正常到不了这里：普通录像在首帧视频锚定时就一起算出了偏移，
+            // 预录交接则无条件沿用预录侧按视频尾帧判定的值。
+            //
+            // 万一真的没算出来，**不能用这帧音频去猜**——音频恒为 BOOTTIME，
+            // 猜出来必然是「不用平移」，在 MTK（相机 MONOTONIC）上就会把整条
+            // 音轨排到几百秒之后，正是最早那三个症状的成因。宁可丢掉开头这
+            // 几帧音频（几十毫秒），也不能让时间轴错位几百秒。
+            Log.w(TAG, "audio pts offset unknown, dropping frame at ${rawPtsUs / 1000}ms")
+            return
         }
         val ptsUs = rawPtsUs - audioPtsOffsetUs - sessionStartUs
         if (ptsUs < 0) return
